@@ -1,3 +1,4 @@
+# streamlit_app.py
 import streamlit as st
 import torch
 import re
@@ -28,6 +29,8 @@ def tokenize_sentences(text):
     sentences = re.split(r'[.!?]+\s+(?=[A-Z])', text)
     # Clean up the sentences and remove empty ones
     sentences = [s.strip() + '.' for s in sentences if s.strip()]
+    if not sentences and text.strip():  # If no sentences found but text exists
+        return [text.strip() + '.']  # Return the entire text as one sentence
     return sentences
 
 # Define the TransformerModel class
@@ -252,12 +255,14 @@ def main():
                     # Clean text
                     cleaned_text = clean_text(review_text)
                     
-                    # Use safe tokenize function
-                    sentences = safe_tokenize(cleaned_text)
+                    # Tokenize into sentences
+                    sentences = tokenize_sentences(cleaned_text)
                     
                     if not sentences:
                         st.warning("No valid sentences found in the input text. Please check your review.")
                         return
+                    
+                    st.info(f"Detected {len(sentences)} sentences in the review.")
                     
                     # Get embeddings
                     embeddings = get_embeddings(sentences, bert_tokenizer, bert_model)
@@ -283,7 +288,7 @@ def main():
                     important_sentences = extract_important_sentences(
                         summary_embeddings, 
                         sentences, 
-                        top_k=3
+                        top_k=min(3, len(sentences))  # Ensure we don't try to get more sentences than exist
                     )
                     
                     # Generate final summary
@@ -298,7 +303,7 @@ def main():
                     st.subheader("Summary")
                     st.write(final_summary)
                     
-                    st.subheader("Important Sentences")
+                    st.subheader("Key Sentences")
                     for i, sentence in enumerate(important_sentences, 1):
                         st.write(f"{i}. {sentence}")
                         
