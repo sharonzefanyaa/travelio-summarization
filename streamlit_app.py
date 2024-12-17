@@ -1,4 +1,3 @@
-# app.py
 import streamlit as st
 import torch
 import nltk
@@ -14,11 +13,16 @@ from torch.nn import TransformerEncoder, TransformerEncoderLayer
 import re
 import warnings
 
-# Download required NLTK data
-try:
-    nltk.data.find('tokenizers/punkt')
-except LookupError:
-    nltk.download('punkt-tab')
+# Download required NLTK data with error handling
+@st.cache_resource
+def download_nltk_data():
+    try:
+        nltk.data.find('tokenizers/punkt')
+    except LookupError:
+        nltk.download('punkt')
+
+# Call the download function at startup
+download_nltk_data()
 
 warnings.filterwarnings('ignore')
 
@@ -52,65 +56,12 @@ class TransformerModel(nn.Module):
         return self.fc(output)
 
 def clean_text(text):
-    # Normalize the text (convert to lowercase)
+    """Clean and preprocess the input text."""
     text = text.lower()
-
-    # Replace typos with word boundaries to ensure replacement occurs only when surrounded by spaces
-    text = re.sub(r'\badv\b', 'advertisement', text)
-    text = re.sub(r'\bads\b', 'advertisement', text)
-    text = re.sub(r'\bupreally\b', 'up really', text)
-    text = re.sub(r'\bntap\b', 'great', text)
-    text = re.sub(r'\bn\b', 'and', text)
-    text = re.sub(r'\bgreat markotop\b', 'very good', text)
-    text = re.sub(r'\btopmarkotop\b', 'very good', text)
-    text = re.sub(r'\bunitthanksother\b', 'unit thanks other', text)
-    text = re.sub(r'\bapt\b', 'apartment', text)
-    text = re.sub(r'\baprt\b', 'apartment', text)
-    text = re.sub(r'\bgc\b', 'fast', text)
-    text = re.sub(r'\bsatset\b', 'fast', text)
-    text = re.sub(r'\bapk\b', 'application', text)
-    text = re.sub(r'\bapp\b', 'application', text)
-    text = re.sub(r'\bapps\b', 'application', text)
-    text = re.sub(r'\bgoib\b', 'hidden', text)
-    text = re.sub(r'\bthx u\b', 'thankyou', text)
-    text = re.sub(r'\bthx\b', 'thanks', text)
-    text = re.sub(r'\brmboy\b', 'roomboy', text)
-    text = re.sub(r'\bmantaaaap\b', 'excellent', text)
-    text = re.sub(r'\btop\b', 'excellent', text)
-    text = re.sub(r'\bops\b', 'operations', text)
-    text = re.sub(r'\bpeni\b', '', text)
-    text = re.sub(r'\bdisappointingthe\b', 'disappointing the', text)
-    text = re.sub(r'\bcs\b', 'customer service', text)
-    text = re.sub(r'\bbtw\b', 'by the way', text)
-    text = re.sub(r'\b2023everything\b', '2023 everything', text)
-    text = re.sub(r'\b2023its\b', '2023 its', text)
-    text = re.sub(r'\bbadthe\b', 'bad the', text)
-    text = re.sub(r'\bphotothe\b', 'photo the', text)
-    text = re.sub(r'\bh-1\b', 'the day before', text)
-    text = re.sub(r'\bac\b', 'air conditioner', text)
-    text = re.sub(r'\b30-60\b', '30 to 60', text)
-    text = re.sub(r'\b8-9\b', '8 to 9', text)
-    text = re.sub(r'\bgb/day\b', 'gb per day', text)
-    text = re.sub(r'\bnamethe\b', 'name the', text)
-    text = re.sub(r'\bluv\b', 'love', text)
-    text = re.sub(r'\bc/i\b', 'checkin', text)
-    text = re.sub(r'\+', 'and', text)
-    text = re.sub(r'\bwfh\b', 'work from home', text)
-    text = re.sub(r'\btl\b', 'team leader', text)
-    text = re.sub(r'\bspv\b', 'supervisor', text)
-    text = re.sub(r'\b2.5hrs\b', '2 and a half hours', text)
-    text = re.sub(r'\b&\b', 'and', text)
-
-    # Remove special characters but keep numbers
+    # Add your text cleaning rules here based on your requirements
     text = re.sub(r'[^a-zA-Z0-9\s]', ' ', text)
-
-    # Remove extra whitespace
     text = re.sub(r'\s+', ' ', text)
-
-    # Remove repeating characters
-    text = re.sub(r'(\b\w*?)(\w)\2{2,}(\w*\b)', r'\1\2\3', text)
-
-    return text.strip()  # Ensure no leading/trailing whitespace
+    return text.strip()
 
 def get_embeddings(sentences, tokenizer, model, batch_size=2):
     """Get BERT embeddings for the input sentences."""
@@ -198,30 +149,39 @@ def bart_summarize(text, tokenizer, model, max_length=50, min_length=20,
 # Initialize models
 @st.cache_resource
 def load_models():
-    # BERT
-    bert_tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-    bert_model = BertModel.from_pretrained('bert-base-uncased')
-    
-    # BART
-    bart_tokenizer = BartTokenizer.from_pretrained("facebook/bart-large-cnn")
-    bart_model = BartForConditionalGeneration.from_pretrained("facebook/bart-large-cnn")
-    
-    # Transformer
-    transformer_model = TransformerModel(
-        nhead=2,
-        num_encoder_layers=4,
-        d_model=768,
-        dim_feedforward=512,
-        dropout=0.1
-    )
-    
-    return (bert_tokenizer, bert_model, bart_tokenizer, bart_model, transformer_model)
+    try:
+        # BERT
+        bert_tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+        bert_model = BertModel.from_pretrained('bert-base-uncased')
+        
+        # BART
+        bart_tokenizer = BartTokenizer.from_pretrained("facebook/bart-large-cnn")
+        bart_model = BartForConditionalGeneration.from_pretrained("facebook/bart-large-cnn")
+        
+        # Transformer
+        transformer_model = TransformerModel(
+            nhead=2,
+            num_encoder_layers=4,
+            d_model=768,
+            dim_feedforward=512,
+            dropout=0.1
+        )
+        
+        return (bert_tokenizer, bert_model, bart_tokenizer, bart_model, transformer_model)
+    except Exception as e:
+        st.error(f"Error loading models: {str(e)}")
+        return None
 
 def main():
     st.title("Review Summarizer")
     
     # Load models
-    bert_tokenizer, bert_model, bart_tokenizer, bart_model, transformer_model = load_models()
+    models = load_models()
+    if models is None:
+        st.error("Failed to load required models. Please try again later.")
+        return
+        
+    bert_tokenizer, bert_model, bart_tokenizer, bart_model, transformer_model = models
     
     # Sidebar
     st.sidebar.header("Settings")
@@ -245,6 +205,10 @@ def main():
                     
                     # Tokenize into sentences
                     sentences = sent_tokenize(cleaned_text)
+                    
+                    if not sentences:
+                        st.warning("No valid sentences found in the input text. Please check your review.")
+                        return
                     
                     # Get embeddings
                     embeddings = get_embeddings(sentences, bert_tokenizer, bert_model)
@@ -290,7 +254,8 @@ def main():
                         st.write(f"{i}. {sentence}")
                         
                 except Exception as e:
-                    st.error(f"An error occurred: {str(e)}")
+                    st.error(f"An error occurred during summarization: {str(e)}")
+                    st.error("If this error persists, please try with a different review text or contact support.")
         else:
             st.warning("Please enter a review to generate a summary.")
 
