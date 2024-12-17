@@ -461,16 +461,6 @@ def main():
         with st.spinner('Downloading required NLTK data...'):
             nltk.download('punkt')
     
-    def main():
-    st.title("Interactive Review Summarization")
-    
-    # Initialize NLTK
-    try:
-        nltk.data.find('tokenizers/punkt')
-    except LookupError:
-        with st.spinner('Downloading required NLTK data...'):
-            nltk.download('punkt')
-    
     # Initialize or load data
     if st.session_state.original_data['positive'] is None:
         if st.button("Load Data from Google Drive"):
