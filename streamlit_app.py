@@ -25,33 +25,12 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def tokenize_sentences(text):
     """Simple regex-based sentence tokenizer"""
-    # Split on period, exclamation mark, or question mark followed by space and uppercase letter
-    sentences = re.split(r'[.!?]+\s+(?=[A-Z])', text)
-    # Clean up the sentences and remove empty ones
-    sentences = [s.strip() + '.' for s in sentences if s.strip()]
-    if not sentences and text.strip():  # If no sentences found but text exists
-        return [text.strip() + '.']  # Return the entire text as one sentence
-    return sentences
-
-# Define the TransformerModel class
-class TransformerModel(nn.Module):
-    def __init__(self, nhead, num_encoder_layers, d_model, dim_feedforward, dropout):
-        super(TransformerModel, self).__init__()
-        encoder_layers = TransformerEncoderLayer(
-            d_model=d_model, 
-            nhead=nhead, 
-            dim_feedforward=dim_feedforward, 
-            dropout=dropout
-        )
-        self.transformer_encoder = TransformerEncoder(
-            encoder_layers, 
-            num_layers=num_encoder_layers
-        )
-        self.fc = nn.Linear(d_model, d_model)
-
-    def forward(self, src):
-        output = self.transformer_encoder(src)
-        return self.fc(output)
+    # First, clean up any irregular spacing around punctuation
+    text = re.sub(r'\s*([.!?])\s*', r'\1 ', text)
+    # Split on period, exclamation mark, or question mark
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    # Clean up and return non-empty sentences
+    return [s.strip() for s in sentences if s.strip()]
 
 def clean_text(text):
     """Clean and preprocess the input text."""
@@ -115,90 +94,114 @@ def clean_text(text):
 
     return text.strip()  # Ensure no leading/trailing whitespace
 
-def get_embeddings(sentences, tokenizer, model, batch_size=2):
+def get_embeddings(sentences, tokenizer, model, batch_size=1):
     """Get BERT embeddings for the input sentences."""
+    if not sentences:
+        return []
+        
     embeddings = []
     for i in range(0, len(sentences), batch_size):
         batch = sentences[i:i + batch_size]
-        tokenized_batch = tokenizer(
-            batch, 
-            return_tensors='pt', 
-            padding=True, 
-            truncation=True
-        )
-        with torch.no_grad():
-            embedding = model(**tokenized_batch).last_hidden_state
-        embeddings.append(embedding.cpu())
+        try:
+            tokenized_batch = tokenizer(
+                batch, 
+                return_tensors='pt', 
+                padding=True, 
+                truncation=True,
+                max_length=512  # Add explicit max length
+            )
+            with torch.no_grad():
+                embedding = model(**tokenized_batch).last_hidden_state
+            embeddings.append(embedding.cpu())
+        except Exception as e:
+            st.error(f"Error processing batch: {str(e)}")
+            continue
     return embeddings
 
 def pad_embeddings(embeddings):
     """Pad embeddings to the same length."""
-    max_length = max(embedding.shape[1] for embedding in embeddings)
-    max_batch_size = 2
+    if not embeddings:
+        return None
+        
+    try:
+        max_length = max(embedding.shape[1] for embedding in embeddings)
+        max_batch_size = 1  # Simplified to handle one sentence at a time
 
-    padded_embeddings = []
-    for embedding in embeddings:
-        current_batch_size = embedding.shape[0]
-        current_length = embedding.shape[1]
+        padded_embeddings = []
+        for embedding in embeddings:
+            if embedding.shape[0] < max_batch_size:
+                embedding = embedding.repeat(max_batch_size, 1, 1)
+            
+            if embedding.shape[1] < max_length:
+                padding_tensor = torch.zeros(
+                    (embedding.shape[0], max_length - embedding.shape[1], embedding.shape[2])
+                )
+                padded_embedding = torch.cat((embedding, padding_tensor), dim=1)
+            else:
+                padded_embedding = embedding
 
-        if current_batch_size < max_batch_size:
-            embedding = embedding.repeat(max_batch_size // current_batch_size, 1, 1)
+            padded_embeddings.append(padded_embedding)
 
-        if current_length < max_length:
-            padding_tensor = torch.zeros(
-                (embedding.shape[0], max_length - current_length, embedding.shape[2])
-            )
-            padded_embedding = torch.cat((embedding, padding_tensor), dim=1)
-        else:
-            padded_embedding = embedding
+        return torch.stack(padded_embeddings)
+    except Exception as e:
+        st.error(f"Error during padding: {str(e)}")
+        return None
 
-        padded_embeddings.append(padded_embedding)
-
-    return torch.stack(padded_embeddings)
-
-def generate_summary_in_batches(model, input_embeddings, batch_size):
+def generate_summary_in_batches(model, input_embeddings, batch_size=1):
     """Generate summaries in batches."""
+    if input_embeddings is None:
+        return None
+        
     model.eval()
     summaries = []
-    with torch.no_grad():
-        for i in range(0, input_embeddings.size(0), batch_size):
-            batch_embeddings = input_embeddings[i:i + batch_size]
-            summary = model(batch_embeddings)
-            summaries.append(summary.cpu())
-    return torch.cat(summaries, dim=0)
+    try:
+        with torch.no_grad():
+            for i in range(0, input_embeddings.size(0), batch_size):
+                batch_embeddings = input_embeddings[i:i + batch_size]
+                summary = model(batch_embeddings)
+                summaries.append(summary.cpu())
+        return torch.cat(summaries, dim=0)
+    except Exception as e:
+        st.error(f"Error generating summary: {str(e)}")
+        return None
 
-def extract_important_sentences(embeddings, original_sentences, top_k=5):
+def extract_important_sentences(embeddings, original_sentences, top_k=3):
     """Extract the most important sentences based on embeddings."""
-    sentence_scores = []
+    if embeddings is None or not original_sentences:
+        return []
+        
+    try:
+        sentence_scores = []
+        for i in range(min(embeddings.shape[0], len(original_sentences))):
+            max_values = embeddings[i].max(dim=0).values
+            mean_value = torch.mean(max_values)
+            sentence_scores.append((mean_value, i))
 
-    for i in range(embeddings.shape[0]):
-        max_values_per_sentence = embeddings[i].max(dim=0).values
-        mean_value_per_sentence = torch.mean(max_values_per_sentence)
-        sentence_scores.append((mean_value_per_sentence, i))
+        sentence_scores.sort(reverse=True)
+        top_k = min(top_k, len(sentence_scores))
+        selected_indices = [idx for _, idx in sentence_scores[:top_k]]
+        return [original_sentences[idx] for idx in sorted(selected_indices)]
+    except Exception as e:
+        st.error(f"Error extracting sentences: {str(e)}")
+        return []
 
-    sentence_scores.sort(reverse=True, key=lambda x: x[0])
-    top_indices = [index for _, index in sentence_scores[:top_k]]
-    important_sentences = [original_sentences[index] for index in top_indices]
-
-    return important_sentences
-
-def bart_summarize(text, tokenizer, model, max_length=50, min_length=20, 
-                  length_penalty=2.0, no_repeat_ngram_size=3, num_beams=2):
+def bart_summarize(text, tokenizer, model, max_length=50, min_length=10):
     """Generate summary using BART."""
-    inputs = tokenizer(text, max_length=1024, return_tensors="pt", truncation=True)
-    inputs = inputs.to(device)
-    summary_ids = model.generate(
-        inputs["input_ids"],
-        max_length=max_length,
-        min_length=min_length,
-        length_penalty=length_penalty,
-        no_repeat_ngram_size=no_repeat_ngram_size,
-        num_beams=num_beams,
-        early_stopping=True,
-    )
-    return tokenizer.decode(summary_ids[0], skip_special_tokens=True)
+    try:
+        inputs = tokenizer(text, max_length=1024, return_tensors="pt", truncation=True)
+        summary_ids = model.generate(
+            inputs["input_ids"],
+            max_length=max_length,
+            min_length=min_length,
+            length_penalty=2.0,
+            num_beams=4,
+            early_stopping=True
+        )
+        return tokenizer.decode(summary_ids[0], skip_special_tokens=True)
+    except Exception as e:
+        st.error(f"Error in BART summarization: {str(e)}")
+        return ""
 
-# Initialize models
 @st.cache_resource
 def load_models():
     try:
@@ -246,66 +249,77 @@ def main():
     st.write(f"Selected Review Type: **{review_type}**")
     
     # Text input
-    review_text = st.text_area("Enter your review (minimum 5 sentences):", height=150)
+    review_text = st.text_area("Enter your review:", height=150)
     
     if st.button("Generate Summary"):
-        if review_text:
-            with st.spinner("Generating summary..."):
-                try:
-                    # Clean text
-                    cleaned_text = clean_text(review_text)
-                    
-                    # Tokenize into sentences
-                    sentences = tokenize_sentences(cleaned_text)
-                    
-                    if not sentences:
-                        st.warning("No valid sentences found in the input text. Please check your review.")
-                        return
-                    
-                    # Get embeddings
-                    embeddings = get_embeddings(sentences, bert_tokenizer, bert_model)
-                    
-                    # Pad embeddings
-                    padded_embeddings = pad_embeddings(embeddings)
-                    
-                    # Reshape embeddings
-                    reshaped_embeddings = padded_embeddings.view(
-                        -1, 
-                        padded_embeddings.shape[2], 
-                        padded_embeddings.shape[3]
-                    )
-                    
-                    # Generate summary embeddings
-                    summary_embeddings = generate_summary_in_batches(
-                        transformer_model, 
-                        reshaped_embeddings, 
-                        batch_size=2
-                    )
-                    
-                    # Extract important sentences
-                    important_sentences = extract_important_sentences(
-                        summary_embeddings, 
-                        sentences, 
-                        top_k=5
-                    )
-                    
-                    # Generate final summary
-                    combined_sentences = " ".join(important_sentences)
-                    final_summary = bart_summarize(
-                        combined_sentences, 
-                        bart_tokenizer, 
-                        bart_model
-                    )
-                    
-                    # Display only the final summary
-                    st.subheader("Summary")
-                    st.write(final_summary)
-                        
-                except Exception as e:
-                    st.error(f"An error occurred during summarization: {str(e)}")
-                    st.error("Please try again with a different review text or contact support.")
-        else:
+        if not review_text:
             st.warning("Please enter a review to generate a summary.")
+            return
+            
+        with st.spinner("Generating summary..."):
+            try:
+                # Clean and prepare text
+                cleaned_text = clean_text(review_text)
+                sentences = tokenize_sentences(cleaned_text)
+                
+                if not sentences:
+                    st.warning("No valid sentences found in the input text. Please check your review.")
+                    return
+                
+                # Process text through the pipeline
+                embeddings = get_embeddings(sentences, bert_tokenizer, bert_model)
+                
+                if not embeddings:
+                    st.error("Could not generate embeddings from the text. Please try a different review.")
+                    return
+                    
+                padded_embeddings = pad_embeddings(embeddings)
+                
+                if padded_embeddings is None:
+                    st.error("Error during embedding processing. Please try a different review.")
+                    return
+                
+                # Reshape embeddings
+                reshaped_embeddings = padded_embeddings.view(
+                    -1, 
+                    padded_embeddings.shape[2], 
+                    padded_embeddings.shape[3]
+                )
+                
+                # Generate summary
+                summary_embeddings = generate_summary_in_batches(
+                    transformer_model, 
+                    reshaped_embeddings
+                )
+                
+                if summary_embeddings is None:
+                    st.error("Error generating summary embeddings. Please try again.")
+                    return
+                
+                important_sentences = extract_important_sentences(
+                    summary_embeddings, 
+                    sentences
+                )
+                
+                if not important_sentences:
+                    st.error("Could not extract key sentences. Please try a different review.")
+                    return
+                
+                # Generate final summary
+                combined_sentences = " ".join(important_sentences)
+                final_summary = bart_summarize(combined_sentences, bart_tokenizer, bart_model)
+                
+                if not final_summary:
+                    st.error("Could not generate final summary. Please try again.")
+                    return
+                
+                # Display the final summary
+                st.subheader("Summary")
+                st.write(final_summary)
+                
+            except Exception as e:
+                st.error("An unexpected error occurred. Please try again with a different review.")
+                st.error(f"Error details: {str(e)}")
 
 if __name__ == "__main__":
     main()
