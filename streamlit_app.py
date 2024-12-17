@@ -50,27 +50,55 @@ def get_google_drive_service():
         if 'token_info' in st.session_state:
             creds = Credentials.from_authorized_user_info(st.session_state.token_info, SCOPES)
         
-        # If no valid credentials, authenticate
+        # If no valid credentials, we need to authenticate
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
             else:
                 # Create client config from secrets
                 client_config = {
-                    "installed": {
+                    "web": {  # Changed from "installed" to "web"
                         "client_id": st.secrets["google_credentials"]["client_id"],
                         "client_secret": st.secrets["google_credentials"]["client_secret"],
-                        "redirect_uris": [st.secrets["google_credentials"]["redirect_uri"]],
+                        "redirect_uris": ["https://share.streamlit.io/oauth2callback"],
                         "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                         "token_uri": "https://accounts.google.com/o/oauth2/token"
                     }
                 }
                 
-                flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
-                creds = flow.run_local_server(port=0)
+                # Create flow
+                flow = InstalledAppFlow.from_client_config(
+                    client_config,
+                    SCOPES,
+                    redirect_uri="https://share.streamlit.io/oauth2callback"
+                )
                 
-                # Save credentials in session state
-                st.session_state.token_info = json.loads(creds.to_json())
+                # Generate authorization URL
+                auth_url, _ = flow.authorization_url(prompt='consent')
+                
+                # Show authentication instructions
+                st.markdown("""
+                ### Google Drive Authentication Required
+                
+                1. Click the link below to authenticate with Google Drive
+                2. After authenticating, copy the entire URL from your browser
+                3. Paste the URL below and click 'Submit'
+                """)
+                
+                st.markdown(f"[Click here to authenticate with Google Drive]({auth_url})")
+                
+                auth_code = st.text_input("Paste the full URL here:")
+                if st.button("Submit"):
+                    try:
+                        flow.fetch_token(authorization_response=auth_code)
+                        creds = flow.credentials
+                        st.session_state.token_info = json.loads(creds.to_json())
+                        st.success("Authentication successful! Please reload the page.")
+                        st.experimental_rerun()
+                    except Exception as e:
+                        st.error(f"Authentication failed: {str(e)}")
+                
+                return None  # Return None while waiting for authentication
         
         # Build and return the service
         service = build('drive', 'v3', credentials=creds)
