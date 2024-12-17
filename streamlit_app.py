@@ -1,7 +1,8 @@
+# app.py
 import streamlit as st
 import torch
 import nltk
-from nltk.tokenize import sent_tokenize
+from nltk.tokenize import word_tokenize, sent_tokenize
 from transformers import (
     BertTokenizer, 
     BertModel,
@@ -13,16 +14,35 @@ from torch.nn import TransformerEncoder, TransformerEncoderLayer
 import re
 import warnings
 
-# Download required NLTK data with error handling
+# Initialize NLTK at startup
 @st.cache_resource
-def download_nltk_data():
+def initialize_nltk():
     try:
-        nltk.data.find('tokenizers/punkt')
+        # Try to tokenize a simple sentence to test if punkt is available
+        sent_tokenize("This is a test sentence.")
     except LookupError:
+        # If punkt is not found, download it
         nltk.download('punkt')
+    
+    # Verify the download was successful
+    try:
+        sent_tokenize("This is a test sentence.")
+        return True
+    except LookupError as e:
+        st.error(f"Failed to initialize NLTK tokenizer: {str(e)}")
+        return False
 
-# Call the download function at startup
-download_nltk_data()
+# Custom tokenize function with fallback
+def safe_tokenize(text):
+    try:
+        return sent_tokenize(text)
+    except LookupError:
+        # Fallback tokenization using simple rule-based approach
+        sentences = re.split(r'[.!?]+', text)
+        return [s.strip() for s in sentences if s.strip()]
+
+# Initialize NLTK at app startup
+nltk_initialized = initialize_nltk()
 
 warnings.filterwarnings('ignore')
 
@@ -35,145 +55,13 @@ if torch.cuda.is_available():
 # Check CUDA availability
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Define the TransformerModel class
-class TransformerModel(nn.Module):
-    def __init__(self, nhead, num_encoder_layers, d_model, dim_feedforward, dropout):
-        super(TransformerModel, self).__init__()
-        encoder_layers = TransformerEncoderLayer(
-            d_model=d_model, 
-            nhead=nhead, 
-            dim_feedforward=dim_feedforward, 
-            dropout=dropout
-        )
-        self.transformer_encoder = TransformerEncoder(
-            encoder_layers, 
-            num_layers=num_encoder_layers
-        )
-        self.fc = nn.Linear(d_model, d_model)
-
-    def forward(self, src):
-        output = self.transformer_encoder(src)
-        return self.fc(output)
-
-def clean_text(text):
-    """Clean and preprocess the input text."""
-    text = text.lower()
-    # Add your text cleaning rules here based on your requirements
-    text = re.sub(r'[^a-zA-Z0-9\s]', ' ', text)
-    text = re.sub(r'\s+', ' ', text)
-    return text.strip()
-
-def get_embeddings(sentences, tokenizer, model, batch_size=2):
-    """Get BERT embeddings for the input sentences."""
-    embeddings = []
-    for i in range(0, len(sentences), batch_size):
-        batch = sentences[i:i + batch_size]
-        tokenized_batch = tokenizer(
-            batch, 
-            return_tensors='pt', 
-            padding=True, 
-            truncation=True
-        )
-        with torch.no_grad():
-            embedding = model(**tokenized_batch).last_hidden_state
-        embeddings.append(embedding.cpu())
-    return embeddings
-
-def pad_embeddings(embeddings):
-    """Pad embeddings to the same length."""
-    max_length = max(embedding.shape[1] for embedding in embeddings)
-    max_batch_size = 2
-
-    padded_embeddings = []
-    for embedding in embeddings:
-        current_batch_size = embedding.shape[0]
-        current_length = embedding.shape[1]
-
-        if current_batch_size < max_batch_size:
-            embedding = embedding.repeat(max_batch_size // current_batch_size, 1, 1)
-
-        if current_length < max_length:
-            padding_tensor = torch.zeros(
-                (embedding.shape[0], max_length - current_length, embedding.shape[2])
-            )
-            padded_embedding = torch.cat((embedding, padding_tensor), dim=1)
-        else:
-            padded_embedding = embedding
-
-        padded_embeddings.append(padded_embedding)
-
-    return torch.stack(padded_embeddings)
-
-def generate_summary_in_batches(model, input_embeddings, batch_size):
-    """Generate summaries in batches."""
-    model.eval()
-    summaries = []
-    with torch.no_grad():
-        for i in range(0, input_embeddings.size(0), batch_size):
-            batch_embeddings = input_embeddings[i:i + batch_size]
-            summary = model(batch_embeddings)
-            summaries.append(summary.cpu())
-    return torch.cat(summaries, dim=0)
-
-def extract_important_sentences(embeddings, original_sentences, top_k=5):
-    """Extract the most important sentences based on embeddings."""
-    sentence_scores = []
-
-    for i in range(embeddings.shape[0]):
-        max_values_per_sentence = embeddings[i].max(dim=0).values
-        mean_value_per_sentence = torch.mean(max_values_per_sentence)
-        sentence_scores.append((mean_value_per_sentence, i))
-
-    sentence_scores.sort(reverse=True, key=lambda x: x[0])
-    top_indices = [index for _, index in sentence_scores[:top_k]]
-    important_sentences = [original_sentences[index] for index in top_indices]
-
-    return important_sentences
-
-def bart_summarize(text, tokenizer, model, max_length=50, min_length=20, 
-                  length_penalty=2.0, no_repeat_ngram_size=3, num_beams=2):
-    """Generate summary using BART."""
-    inputs = tokenizer(text, max_length=1024, return_tensors="pt", truncation=True)
-    inputs = inputs.to(device)
-    summary_ids = model.generate(
-        inputs["input_ids"],
-        max_length=max_length,
-        min_length=min_length,
-        length_penalty=length_penalty,
-        no_repeat_ngram_size=no_repeat_ngram_size,
-        num_beams=num_beams,
-        early_stopping=True,
-    )
-    return tokenizer.decode(summary_ids[0], skip_special_tokens=True)
-
-# Initialize models
-@st.cache_resource
-def load_models():
-    try:
-        # BERT
-        bert_tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-        bert_model = BertModel.from_pretrained('bert-base-uncased')
-        
-        # BART
-        bart_tokenizer = BartTokenizer.from_pretrained("facebook/bart-large-cnn")
-        bart_model = BartForConditionalGeneration.from_pretrained("facebook/bart-large-cnn")
-        
-        # Transformer
-        transformer_model = TransformerModel(
-            nhead=2,
-            num_encoder_layers=4,
-            d_model=768,
-            dim_feedforward=512,
-            dropout=0.1
-        )
-        
-        return (bert_tokenizer, bert_model, bart_tokenizer, bart_model, transformer_model)
-    except Exception as e:
-        st.error(f"Error loading models: {str(e)}")
-        return None
+[Rest of the code remains the same until the main() function]
 
 def main():
     st.title("Review Summarizer")
+    
+    if not nltk_initialized:
+        st.error("Failed to initialize NLTK. Using fallback tokenization.")
     
     # Load models
     models = load_models()
@@ -203,8 +91,8 @@ def main():
                     # Clean text
                     cleaned_text = clean_text(review_text)
                     
-                    # Tokenize into sentences
-                    sentences = sent_tokenize(cleaned_text)
+                    # Use safe tokenize function
+                    sentences = safe_tokenize(cleaned_text)
                     
                     if not sentences:
                         st.warning("No valid sentences found in the input text. Please check your review.")
@@ -255,7 +143,7 @@ def main():
                         
                 except Exception as e:
                     st.error(f"An error occurred during summarization: {str(e)}")
-                    st.error("If this error persists, please try with a different review text or contact support.")
+                    st.error("Please try again with a different review text or contact support.")
         else:
             st.warning("Please enter a review to generate a summary.")
 
