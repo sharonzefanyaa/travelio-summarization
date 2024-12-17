@@ -42,6 +42,7 @@ warnings.filterwarnings('ignore')
 # If modifying these scopes, delete the file token.json.
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 
+# Authentication function (not cached)
 def get_google_drive_service():
     try:
         creds = None
@@ -55,50 +56,8 @@ def get_google_drive_service():
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
             else:
-                # Create client config from secrets
-                client_config = {
-                    "web": {  # Changed from "installed" to "web"
-                        "client_id": st.secrets["google_credentials"]["client_id"],
-                        "client_secret": st.secrets["google_credentials"]["client_secret"],
-                        "redirect_uris": ["https://share.streamlit.io/oauth2callback"],
-                        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                        "token_uri": "https://accounts.google.com/o/oauth2/token"
-                    }
-                }
-                
-                # Create flow
-                flow = InstalledAppFlow.from_client_config(
-                    client_config,
-                    SCOPES,
-                    redirect_uri="https://share.streamlit.io/oauth2callback"
-                )
-                
-                # Generate authorization URL
-                auth_url, _ = flow.authorization_url(prompt='consent')
-                
-                # Show authentication instructions
-                st.markdown("""
-                ### Google Drive Authentication Required
-                
-                1. Click the link below to authenticate with Google Drive
-                2. After authenticating, copy the entire URL from your browser
-                3. Paste the URL below and click 'Submit'
-                """)
-                
-                st.markdown(f"[Click here to authenticate with Google Drive]({auth_url})")
-                
-                auth_code = st.text_input("Paste the full URL here:")
-                if st.button("Submit"):
-                    try:
-                        flow.fetch_token(authorization_response=auth_code)
-                        creds = flow.credentials
-                        st.session_state.token_info = json.loads(creds.to_json())
-                        st.success("Authentication successful! Please reload the page.")
-                        st.experimental_rerun()
-                    except Exception as e:
-                        st.error(f"Authentication failed: {str(e)}")
-                
-                return None  # Return None while waiting for authentication
+                st.error("Google Drive authentication required. Please authenticate first.")
+                return None
         
         # Build and return the service
         service = build('drive', 'v3', credentials=creds)
@@ -107,6 +66,55 @@ def get_google_drive_service():
     except Exception as e:
         st.error(f"Authentication error: {str(e)}")
         return None
+
+# Separate authentication UI function
+def show_auth_ui():
+    try:
+        # Create client config from secrets
+        client_config = {
+            "web": {
+                "client_id": st.secrets["google_credentials"]["client_id"],
+                "client_secret": st.secrets["google_credentials"]["client_secret"],
+                "redirect_uris": ["https://share.streamlit.io/oauth2callback"],
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://accounts.google.com/o/oauth2/token"
+            }
+        }
+        
+        # Create flow
+        flow = InstalledAppFlow.from_client_config(
+            client_config,
+            SCOPES,
+            redirect_uri="https://share.streamlit.io/oauth2callback"
+        )
+        
+        # Generate authorization URL
+        auth_url, _ = flow.authorization_url(prompt='consent')
+        
+        # Show authentication instructions
+        st.markdown("""
+        ### Google Drive Authentication Required
+        
+        1. Click the link below to authenticate with Google Drive
+        2. After authenticating, copy the entire URL from your browser
+        3. Paste the URL below and click 'Submit'
+        """)
+        
+        st.markdown(f"[Click here to authenticate with Google Drive]({auth_url})")
+        
+        auth_code = st.text_input("Paste the full URL here:")
+        if st.button("Submit"):
+            try:
+                flow.fetch_token(authorization_response=auth_code)
+                creds = flow.credentials
+                st.session_state.token_info = json.loads(creds.to_json())
+                st.success("Authentication successful! Please reload the page.")
+                st.experimental_rerun()
+            except Exception as e:
+                st.error(f"Authentication failed: {str(e)}")
+
+    except Exception as e:
+        st.error(f"Error setting up authentication: {str(e)}")
 
 def download_file_from_drive(service, file_id):
     try:
@@ -155,12 +163,11 @@ def set_seed(seed_value=42):
     torch.manual_seed(seed_value)
     torch.cuda.manual_seed_all(seed_value)
     np.random.seed(seed_value)
-    
-# Load and preprocess data
+
+# Cached data loading function (no widgets)
 @st.cache_data
 def load_original_data():
     try:
-        # Get Google Drive service
         service = get_google_drive_service()
         if not service:
             return None
@@ -518,6 +525,11 @@ def main():
     except LookupError:
         with st.spinner('Downloading required NLTK data...'):
             nltk.download('punkt')
+
+    # Check authentication first
+    if 'token_info' not in st.session_state:
+        show_auth_ui()
+        return
     
     # Initialize or load data
     if st.session_state.original_data['positive'] is None:
