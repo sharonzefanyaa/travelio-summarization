@@ -246,7 +246,7 @@ def main():
     st.write(f"Selected Review Type: **{review_type}**")
     
     # Text input
-    review_text = st.text_area("Enter your review:", height=150)
+    review_text = st.text_area("Enter your review (minimum 5 sentences):", height=150)
     
     if st.button("Generate Summary"):
         if review_text:
@@ -261,8 +261,6 @@ def main():
                     if not sentences:
                         st.warning("No valid sentences found in the input text. Please check your review.")
                         return
-                    
-                    st.info(f"Detected {len(sentences)} sentences in the review.")
                     
                     # Get embeddings
                     embeddings = get_embeddings(sentences, bert_tokenizer, bert_model)
@@ -288,7 +286,7 @@ def main():
                     important_sentences = extract_important_sentences(
                         summary_embeddings, 
                         sentences, 
-                        top_k=min(3, len(sentences))  # Ensure we don't try to get more sentences than exist
+                        top_k=5
                     )
                     
                     # Generate final summary
@@ -299,13 +297,9 @@ def main():
                         bart_model
                     )
                     
-                    # Display results
+                    # Display only the final summary
                     st.subheader("Summary")
                     st.write(final_summary)
-                    
-                    st.subheader("Key Sentences")
-                    for i, sentence in enumerate(important_sentences, 1):
-                        st.write(f"{i}. {sentence}")
                         
                 except Exception as e:
                     st.error(f"An error occurred during summarization: {str(e)}")
