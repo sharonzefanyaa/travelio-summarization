@@ -1,5 +1,22 @@
-import streamlit as st
+# Core Python imports
+import os
+import re
+import gc
+import io
+import json
+import warnings
+from datetime import datetime
+
+# Data processing imports
+import numpy as np
+import pandas as pd
+
+# Deep learning imports
 import torch
+import torch.nn as nn
+from torch.nn import TransformerEncoder, TransformerEncoderLayer
+
+# NLP imports
 import nltk
 from nltk.tokenize import sent_tokenize
 from transformers import (
@@ -8,23 +25,16 @@ from transformers import (
     BartTokenizer, 
     BartForConditionalGeneration
 )
-import torch.nn as nn
-from torch.nn import TransformerEncoder, TransformerEncoderLayer
-import re
-import pandas as pd
-import numpy as np
-import warnings
-import os
-from datetime import datetime
-import gc
 
-import io
+# Google API imports
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
-import json
+
+# Streamlit import
+import streamlit as st
 
 # Suppress warnings
 warnings.filterwarnings('ignore')
