@@ -1,8 +1,6 @@
-# app.py
 import streamlit as st
 import torch
-import nltk
-from nltk.tokenize import word_tokenize, sent_tokenize
+import re
 from transformers import (
     BertTokenizer, 
     BertModel,
@@ -11,38 +9,7 @@ from transformers import (
 )
 import torch.nn as nn
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
-import re
 import warnings
-
-# Initialize NLTK at startup
-@st.cache_resource
-def initialize_nltk():
-    try:
-        # Try to tokenize a simple sentence to test if punkt is available
-        sent_tokenize("This is a test sentence.")
-    except LookupError:
-        # If punkt is not found, download it
-        nltk.download('punkt')
-    
-    # Verify the download was successful
-    try:
-        sent_tokenize("This is a test sentence.")
-        return True
-    except LookupError as e:
-        st.error(f"Failed to initialize NLTK tokenizer: {str(e)}")
-        return False
-
-# Custom tokenize function with fallback
-def safe_tokenize(text):
-    try:
-        return sent_tokenize(text)
-    except LookupError:
-        # Fallback tokenization using simple rule-based approach
-        sentences = re.split(r'[.!?]+', text)
-        return [s.strip() for s in sentences if s.strip()]
-
-# Initialize NLTK at app startup
-nltk_initialized = initialize_nltk()
 
 warnings.filterwarnings('ignore')
 
@@ -54,6 +21,14 @@ if torch.cuda.is_available():
 
 # Check CUDA availability
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+def tokenize_sentences(text):
+    """Simple regex-based sentence tokenizer"""
+    # Split on period, exclamation mark, or question mark followed by space and uppercase letter
+    sentences = re.split(r'[.!?]+\s+(?=[A-Z])', text)
+    # Clean up the sentences and remove empty ones
+    sentences = [s.strip() + '.' for s in sentences if s.strip()]
+    return sentences
 
 # Define the TransformerModel class
 class TransformerModel(nn.Module):
