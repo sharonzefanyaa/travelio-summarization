@@ -178,7 +178,7 @@ def extract_important_sentences(embeddings, original_sentences, top_k=3):
             sentence_scores.append((mean_value, i))
 
         sentence_scores.sort(reverse=True)
-        top_k = min(top_k, len(sentence_scores))
+        top_k = min(5, len(sentence_scores))
         selected_indices = [idx for _, idx in sentence_scores[:top_k]]
         return [original_sentences[idx] for idx in sorted(selected_indices)]
     except Exception as e:
