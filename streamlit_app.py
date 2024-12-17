@@ -24,6 +24,8 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
+import os
+import json
 
 # Suppress warnings
 warnings.filterwarnings('ignore')
@@ -33,39 +35,41 @@ SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 
 def get_google_drive_service():
     creds = None
-    # Get the absolute path to credentials.json
-    credentials_path = os.path.join(os.path.dirname(__file__), 'credentials.json')
     
-    if not os.path.exists(credentials_path):
-        st.error("credentials.json not found. Please follow the setup instructions.")
-        return None
-        
-    # The file token.json stores the user's access and refresh tokens
-    token_path = os.path.join(os.path.dirname(__file__), 'token.json')
-    if os.path.exists(token_path):
-        creds = Credentials.from_authorized_user_file(token_path, SCOPES)
-    
-    # If credentials are not valid, let user log in
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            try:
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    credentials_path, SCOPES)
-                creds = flow.run_local_server(port=0)
-                # Save the credentials
-                with open(token_path, 'w') as token:
-                    token.write(creds.to_json())
-            except Exception as e:
-                st.error(f"Error during authentication: {str(e)}")
-                return None
-
+    # Create credentials from Streamlit secrets
     try:
+        if 'token_info' in st.session_state:
+            creds = Credentials.from_authorized_user_info(st.session_state.token_info, SCOPES)
+            
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                # Create flow using secrets
+                client_config = {
+                    "installed": {
+                        "client_id": st.secrets["google_credentials"]["client_id"],
+                        "client_secret": st.secrets["google_credentials"]["client_secret"],
+                        "redirect_uris": ["http://localhost:8501"],
+                        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                        "token_uri": "https://accounts.google.com/o/oauth2/token"
+                    }
+                }
+                
+                flow = InstalledAppFlow.from_client_config(
+                    client_config,
+                    SCOPES
+                )
+                creds = flow.run_local_server(port=0)
+                
+                # Save token info in session state
+                st.session_state.token_info = json.loads(creds.to_json())
+                
         service = build('drive', 'v3', credentials=creds)
         return service
+        
     except Exception as e:
-        st.error(f"Error building Drive service: {str(e)}")
+        st.error(f"Authentication error: {str(e)}")
         return None
 
 def download_file_from_drive(service, file_id):
@@ -120,26 +124,29 @@ def set_seed(seed_value=42):
 @st.cache_data
 def load_original_data():
     try:
-        # Initialize Drive service
         service = get_google_drive_service()
         if not service:
             return None
 
-        # File IDs from your Google Drive
+        # Your Google Drive file IDs
         file_ids = {
-            'positive': 'positive_text.txt',  # Replace with actual file ID
-            'neutral': 'neutral_text.txt',    # Replace with actual file ID
-            'negative': 'negative_text.txt'   # Replace with actual file ID
+            'positive': st.secrets["file_ids"]["positive"],
+            'neutral': st.secrets["file_ids"]["neutral"],
+            'negative': st.secrets["file_ids"]["negative"]
         }
 
         data = {}
         for sentiment, file_id in file_ids.items():
-            content = download_file_from_drive(service, file_id)
-            if content is None:
-                raise Exception(f"Failed to download {sentiment} file")
-            data[sentiment] = content
+            request = service.files().get_media(fileId=file_id)
+            file = io.BytesIO()
+            downloader = MediaIoBaseDownload(file, request)
+            done = False
+            while done is False:
+                status, done = downloader.next_chunk()
+            file.seek(0)
+            data[sentiment] = file.read().decode('utf-8')
+
         return data
-        
     except Exception as e:
         st.error(f"Error loading data: {str(e)}")
         return None
