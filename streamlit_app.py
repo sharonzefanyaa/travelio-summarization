@@ -18,8 +18,57 @@ import os
 from datetime import datetime
 import gc
 
+import io
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
+
 # Suppress warnings
 warnings.filterwarnings('ignore')
+
+# If modifying these scopes, delete the file token.json.
+SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
+
+def get_google_drive_service():
+    creds = None
+    # The file token.json stores the user's access and refresh tokens
+    if os.path.exists('token.json'):
+        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+    
+    # If credentials are not valid, let user log in
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(
+                'credentials.json', SCOPES)
+            creds = flow.run_local_server(port=0)
+        # Save the credentials
+        with open('token.json', 'w') as token:
+            token.write(creds.to_json())
+
+    try:
+        service = build('drive', 'v3', credentials=creds)
+        return service
+    except Exception as e:
+        st.error(f"Error building Drive service: {str(e)}")
+        return None
+
+def download_file_from_drive(service, file_id):
+    try:
+        request = service.files().get_media(fileId=file_id)
+        file = io.BytesIO()
+        downloader = MediaIoBaseDownload(file, request)
+        done = False
+        while done is False:
+            status, done = downloader.next_chunk()
+        file.seek(0)
+        return file.read().decode('utf-8')
+    except Exception as e:
+        st.error(f"Error downloading file: {str(e)}")
+        return None
 
 # Memory management
 def clear_memory():
@@ -57,22 +106,28 @@ def set_seed(seed_value=42):
     
 # Load and preprocess data
 @st.cache_data
-def load_original_data(data_path):
+def load_original_data():
     try:
-        # Verify path exists
-        if not os.path.exists(data_path):
-            raise Exception(f"Directory not found: {data_path}")
-            
-        # Load text files with error checking
+        # Initialize Drive service
+        service = get_google_drive_service()
+        if not service:
+            return None
+
+        # File IDs from your Google Drive
+        file_ids = {
+            'positive': 'positive_text.txt',  # Replace with actual file ID
+            'neutral': 'neutral_text.txt',    # Replace with actual file ID
+            'negative': 'negative_text.txt'   # Replace with actual file ID
+        }
+
         data = {}
-        for sentiment in ['positive', 'neutral', 'negative']:
-            file_path = os.path.join(data_path, f'{sentiment}_text.txt')
-            if not os.path.exists(file_path):
-                raise Exception(f"File not found: {file_path}")
-            with open(file_path, 'r', encoding='utf-8') as file:
-                data[sentiment] = file.read()
-        
+        for sentiment, file_id in file_ids.items():
+            content = download_file_from_drive(service, file_id)
+            if content is None:
+                raise Exception(f"Failed to download {sentiment} file")
+            data[sentiment] = content
         return data
+        
     except Exception as e:
         st.error(f"Error loading data: {str(e)}")
         return None
@@ -406,15 +461,25 @@ def main():
         with st.spinner('Downloading required NLTK data...'):
             nltk.download('punkt')
     
+    def main():
+    st.title("Interactive Review Summarization")
+    
+    # Initialize NLTK
+    try:
+        nltk.data.find('tokenizers/punkt')
+    except LookupError:
+        with st.spinner('Downloading required NLTK data...'):
+            nltk.download('punkt')
+    
     # Initialize or load data
     if st.session_state.original_data['positive'] is None:
-        data_path = st.text_input("Enter path to data directory:", "/content/drive/My Drive/Skripsi-2501961022/Dataset/")
-        if st.button("Load Data"):
-            data = load_original_data(data_path)
-            if data:
-                st.session_state.original_data = data
-                st.session_state.current_data = data.copy()
-                st.success("Data loaded successfully!")
+        if st.button("Load Data from Google Drive"):
+            with st.spinner("Connecting to Google Drive..."):
+                data = load_original_data()
+                if data:
+                    st.session_state.original_data = data
+                    st.session_state.current_data = data.copy()
+                    st.success("Data loaded successfully from Google Drive!")
     
     if st.session_state.original_data['positive'] is not None:
         # Main interface
