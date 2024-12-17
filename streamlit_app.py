@@ -18,7 +18,7 @@ import warnings
 try:
     nltk.data.find('tokenizers/punkt')
 except LookupError:
-    nltk.download('punkt')
+    nltk.download('punkt-tab')
 
 warnings.filterwarnings('ignore')
 
