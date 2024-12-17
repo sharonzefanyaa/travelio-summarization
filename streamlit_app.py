@@ -24,7 +24,6 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
-import os
 import json
 
 # Suppress warnings
@@ -34,37 +33,36 @@ warnings.filterwarnings('ignore')
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 
 def get_google_drive_service():
-    creds = None
-    
-    # Create credentials from Streamlit secrets
     try:
+        creds = None
+        
+        # Check if we have token in session state
         if 'token_info' in st.session_state:
             creds = Credentials.from_authorized_user_info(st.session_state.token_info, SCOPES)
-            
+        
+        # If no valid credentials, authenticate
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
             else:
-                # Create flow using secrets
+                # Create client config from secrets
                 client_config = {
                     "installed": {
                         "client_id": st.secrets["google_credentials"]["client_id"],
                         "client_secret": st.secrets["google_credentials"]["client_secret"],
-                        "redirect_uris": ["http://localhost:8501"],
+                        "redirect_uris": [st.secrets["google_credentials"]["redirect_uri"]],
                         "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                         "token_uri": "https://accounts.google.com/o/oauth2/token"
                     }
                 }
                 
-                flow = InstalledAppFlow.from_client_config(
-                    client_config,
-                    SCOPES
-                )
+                flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
                 creds = flow.run_local_server(port=0)
                 
-                # Save token info in session state
+                # Save credentials in session state
                 st.session_state.token_info = json.loads(creds.to_json())
-                
+        
+        # Build and return the service
         service = build('drive', 'v3', credentials=creds)
         return service
         
@@ -124,17 +122,19 @@ def set_seed(seed_value=42):
 @st.cache_data
 def load_original_data():
     try:
+        # Get Google Drive service
         service = get_google_drive_service()
         if not service:
             return None
-
-        # Your Google Drive file IDs
+            
+        # Get file IDs from secrets
         file_ids = {
             'positive': st.secrets["file_ids"]["positive"],
             'neutral': st.secrets["file_ids"]["neutral"],
             'negative': st.secrets["file_ids"]["negative"]
         }
-
+        
+        # Download each file
         data = {}
         for sentiment, file_id in file_ids.items():
             request = service.files().get_media(fileId=file_id)
@@ -145,8 +145,9 @@ def load_original_data():
                 status, done = downloader.next_chunk()
             file.seek(0)
             data[sentiment] = file.read().decode('utf-8')
-
+        
         return data
+        
     except Exception as e:
         st.error(f"Error loading data: {str(e)}")
         return None
