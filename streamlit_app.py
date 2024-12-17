@@ -399,6 +399,117 @@ def generate_summary(text, bert_tokenizer, bert_model, bart_tokenizer, bart_mode
 def main():
     st.title("Interactive Review Summarization")
     
-    # Check for NLTK data
+    # Initialize NLTK
     try:
-        nltk.
+        nltk.data.find('tokenizers/punkt')
+    except LookupError:
+        with st.spinner('Downloading required NLTK data...'):
+            nltk.download('punkt')
+    
+    # Initialize or load data
+    if st.session_state.original_data['positive'] is None:
+        data_path = st.text_input("Enter path to data directory:", "/content/drive/My Drive/Skripsi-2501961022/Dataset/")
+        if st.button("Load Data"):
+            data = load_original_data(data_path)
+            if data:
+                st.session_state.original_data = data
+                st.session_state.current_data = data.copy()
+                st.success("Data loaded successfully!")
+    
+    if st.session_state.original_data['positive'] is not None:
+        # Main interface
+        st.sidebar.title("Actions")
+        action = st.sidebar.radio(
+            "Choose action:",
+            ["View Summary", "Add Review"]
+        )
+        
+        if action == "View Summary":
+            sentiment_type = st.selectbox(
+                "Select sentiment type:",
+                ["Positive", "Neutral", "Negative"]
+            )
+            
+            if st.button("Generate Summary"):
+                with st.spinner("Generating summary..."):
+                    bert_tokenizer, bert_model, bart_tokenizer, bart_model = load_models()
+                    if None in (bert_tokenizer, bert_model, bart_tokenizer, bart_model):
+                        st.error("Failed to load models. Please try again.")
+                        return
+                        
+                    current_text = st.session_state.current_data[sentiment_type.lower()]
+                    summary = generate_summary(
+                        current_text,
+                        bert_tokenizer,
+                        bert_model,
+                        bart_tokenizer,
+                        bart_model
+                    )
+                    
+                    if summary:
+                        st.subheader(f"{sentiment_type} Review Summary")
+                        st.write(summary)
+                        
+                        # Add download button for summary
+                        st.download_button(
+                            label="Download Summary",
+                            data=summary,
+                            file_name=f"{sentiment_type.lower()}_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                            mime="text/plain"
+                        )
+        
+        elif action == "Add Review":
+            st.subheader("Add New Review")
+            review_text = st.text_area("Enter your review:", height=150)
+            sentiment = st.selectbox(
+                "Select review sentiment:",
+                ["Positive", "Neutral", "Negative"]
+            )
+            
+            if st.button("Submit Review"):
+                if review_text:
+                    with st.spinner("Processing review..."):
+                        # Clean and preprocess review
+                        cleaned_review = clean_text(review_text)
+                        
+                        # Add to session state
+                        st.session_state.added_reviews[sentiment.lower()].append(cleaned_review)
+                        
+                        # Update current data
+                        current_text = st.session_state.current_data[sentiment.lower()]
+                        st.session_state.current_data[sentiment.lower()] = current_text + " " + cleaned_review
+                        
+                        # Save new reviews to file
+                        if save_reviews_to_file(
+                            {sentiment.lower(): [cleaned_review]},
+                            os.path.dirname(st.session_state.original_data['positive'])
+                        ):
+                            st.success("Review added and saved successfully!")
+                        
+                        # Show options
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            if st.button("Add More"):
+                                st.experimental_rerun()
+                        with col2:
+                            if st.button("Exit"):
+                                # Reset to original data
+                                st.session_state.current_data = st.session_state.original_data.copy()
+                                st.session_state.added_reviews = {
+                                    'positive': [],
+                                    'neutral': [],
+                                    'negative': []
+                                }
+                                st.experimental_rerun()
+                else:
+                    st.warning("Please enter a review before submitting.")
+        
+        # Display stats
+        st.sidebar.subheader("Statistics")
+        st.sidebar.write(f"Added reviews:")
+        st.sidebar.write(f"- Positive: {len(st.session_state.added_reviews['positive'])}")
+        st.sidebar.write(f"- Neutral: {len(st.session_state.added_reviews['neutral'])}")
+        st.sidebar.write(f"- Negative: {len(st.session_state.added_reviews['negative'])}")
+
+if __name__ == "__main__":
+    main()
