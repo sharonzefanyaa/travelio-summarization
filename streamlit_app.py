@@ -259,7 +259,7 @@ def extract_important_sentences(embeddings, original_sentences, top_k=3):
         st.error(f"Error extracting sentences: {str(e)}")
         return []
 
-def bart_summarize(text, tokenizer, model, max_length=max_length, min_length=min_length):
+def bart_summarize(text, tokenizer, model, max_length=50, min_length=20):
     """Generate summary using BART."""
     try:
         inputs = tokenizer(text, max_length=1024, return_tensors="pt", truncation=True)
