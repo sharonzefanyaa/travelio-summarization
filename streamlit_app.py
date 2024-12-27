@@ -237,7 +237,7 @@ def generate_summary_in_batches(model, input_embeddings, batch_size=32):
         st.error(f"Error generating summary: {str(e)}")
         return None
 
-def extract_important_sentences(embeddings, original_sentences, top_k=5):
+def extract_important_sentences(embeddings, original_sentences, top_k=3):
     if embeddings is None or not original_sentences:
         return []
         
@@ -300,15 +300,26 @@ def load_models():
         return None
 
 def process_all_reviews(temp_dataset, bert_tokenizer, bert_model, bart_tokenizer, bart_model, transformer_model):
-    # Combine all texts for unified summarization
-    combined_text = " ".join(temp_dataset['cleaned_text'].tolist())
-    
-    # Process combined text
-    sentences = sent_tokenize(combined_text)
-    embeddings = get_embeddings(sentences, bert_tokenizer, bert_model)
-    padded_embeddings = pad_embeddings(embeddings)
-    
-    if padded_embeddings is not None:
+    try:
+        # Combine all texts
+        combined_text = " ".join(temp_dataset['cleaned_text'].tolist())
+        if not combined_text.strip():
+            return []
+            
+        # Get sentences and embeddings
+        sentences = sent_tokenize(combined_text)
+        if not sentences:
+            return []
+            
+        embeddings = get_embeddings(sentences, bert_tokenizer, bert_model)
+        if not embeddings:
+            return []
+            
+        padded_embeddings = pad_embeddings(embeddings)
+        if padded_embeddings is None:
+            return []
+
+        # Process through transformer
         reshaped_embeddings = padded_embeddings.view(
             -1, padded_embeddings.shape[2], padded_embeddings.shape[3]
         )
@@ -317,21 +328,26 @@ def process_all_reviews(temp_dataset, bert_tokenizer, bert_model, bart_tokenizer
             transformer_model, reshaped_embeddings
         )
         
+        # Extract important sentences
         important_sentences = extract_important_sentences(
-            summary_embeddings, sentences
+            summary_embeddings, sentences, top_k=min(5, len(sentences))
         )
         
         if important_sentences:
+            # Generate final summary
             final_summary = bart_summarize(
                 " ".join(important_sentences),
                 bart_tokenizer,
                 bart_model,
-                max_length=50,
-                min_length=20
+                max_length=30,
+                min_length=15
             )
             return [{'text': combined_text, 'summary': final_summary}]
-    
-    return []
+        
+        return []
+    except Exception as e:
+        st.error(f"Processing error: {str(e)}")
+        return []
 
 def main():
     st.title("Reviews Summarizer")
