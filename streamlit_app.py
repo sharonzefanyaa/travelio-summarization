@@ -1,3 +1,4 @@
+# streamlit_app.py
 import streamlit as st
 import torch
 import re
@@ -5,6 +6,27 @@ import pandas as pd
 import sqlite3
 import requests
 from io import StringIO
+
+from transformers import (
+    BertTokenizer, 
+    BertModel,
+    BartTokenizer, 
+    BartForConditionalGeneration
+)
+import torch.nn as nn
+from torch.nn import TransformerEncoder, TransformerEncoderLayer
+import warnings
+
+warnings.filterwarnings('ignore')
+
+# Set random seed for reproducibility
+SEED_VALUE = 42
+torch.manual_seed(SEED_VALUE)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(SEED_VALUE)
+
+# Check CUDA availability
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Constants
 GITHUB_BASE_URL = "https://raw.githubusercontent.com/sharonzefanyaa/travelio-summarization/d8459d9276f0410a4d549a19381dc8e93544195b/"
@@ -67,6 +89,15 @@ def initialize_database():
     db = DatabaseManager()
     db.load_initial_data()
     return db
+
+def tokenize_sentences(text):
+    """Simple regex-based sentence tokenizer"""
+    # First, clean up any irregular spacing around punctuation
+    text = re.sub(r'\s*([.!?])\s*', r'\1 ', text)
+    # Split on period, exclamation mark, or question mark
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    # Clean up and return non-empty sentences
+    return [s.strip() for s in sentences if s.strip()]
 
 def clean_text(text):
     """Clean and preprocess the input text."""
