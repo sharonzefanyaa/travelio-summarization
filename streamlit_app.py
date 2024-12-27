@@ -103,15 +103,6 @@ class DatabaseManager:
 def initialize_database():
     return DatabaseManager()
 
-def tokenize_sentences(text):
-    """Simple regex-based sentence tokenizer"""
-    # First, clean up any irregular spacing around punctuation
-    text = re.sub(r'\s*([.!?])\s*', r'\1 ', text)
-    # Split on period, exclamation mark, or question mark
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    # Clean up and return non-empty sentences
-    return [s.strip() for s in sentences if s.strip()]
-
 def clean_text(text):
     """Clean and preprocess the input text."""
     # Normalize the text (convert to lowercase)
