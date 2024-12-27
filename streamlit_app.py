@@ -13,6 +13,8 @@ from transformers import (
     BartTokenizer, 
     BartForConditionalGeneration
 )
+import nltk
+from nltk.tokenize import sent_tokenize
 import torch.nn as nn
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 import warnings
@@ -302,7 +304,7 @@ def process_all_reviews(temp_dataset, bert_tokenizer, bert_model, bart_tokenizer
     summaries = []
     
     for _, row in temp_dataset.iterrows():
-        sentences = row['cleaned_text']
+        sentences = sent_tokenize(row['cleaned_text'])
         embeddings = get_embeddings(sentences, bert_tokenizer, bert_model)
         padded_embeddings = pad_embeddings(embeddings)
         
