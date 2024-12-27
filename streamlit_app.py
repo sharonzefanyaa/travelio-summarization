@@ -50,9 +50,21 @@ class TransformerModel(nn.Module):
 class DatabaseManager:
     def __init__(self):
         self.db_path = 'reviews.db'
+        self.create_tables()
         
     def get_connection(self):
         return sqlite3.connect(self.db_path)
+        
+    def create_tables(self):
+        with self.get_connection() as conn:
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS reviews (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    text TEXT NOT NULL,
+                    sentiment TEXT NOT NULL,
+                    cleaned_text TEXT NOT NULL
+                )
+            ''')
 
     def load_sentiment_data(self, sentiment):
         url = GITHUB_BASE_URL + TEXT_FILES[sentiment]
@@ -62,10 +74,7 @@ class DatabaseManager:
         return []
 
     def create_temp_dataset(self, new_text, sentiment, cleaned_text):
-        # Load original sentiment data
         original_texts = self.load_sentiment_data(sentiment)
-        
-        # Create DataFrame from original texts
         temp_data = []
         for text in original_texts:
             temp_data.append({
@@ -73,24 +82,26 @@ class DatabaseManager:
                 'sentiment': sentiment,
                 'cleaned_text': clean_text(text)
             })
-            
-        # Add new review
         temp_data.append({
             'text': new_text,
             'sentiment': sentiment,
             'cleaned_text': cleaned_text
         })
-        
         return pd.DataFrame(temp_data)
+    
+    def add_review(self, text, sentiment, cleaned_text):
+        with self.get_connection() as conn:
+            conn.execute(
+                'INSERT INTO reviews (text, sentiment, cleaned_text) VALUES (?, ?, ?)',
+                (text, sentiment, cleaned_text)
+            )
+    
+    def get_all_reviews(self):
+        with self.get_connection() as conn:
+            return pd.read_sql('SELECT * FROM reviews', conn)
 
 def initialize_database():
-    try:
-        db = DatabaseManager()
-        db.load_initial_data()
-        return db
-    except Exception as e:
-        st.error(f"Database initialization error: {str(e)}")
-        return None
+    return DatabaseManager()
 
 def tokenize_sentences(text):
     """Simple regex-based sentence tokenizer"""
