@@ -239,7 +239,7 @@ def generate_summary_in_batches(model, input_embeddings, batch_size=1):
         st.error(f"Error generating summary: {str(e)}")
         return None
 
-def extract_important_sentences(embeddings, original_sentences, top_k=3):
+def extract_important_sentences(embeddings, original_sentences, top_k=5):
     """Extract the most important sentences based on embeddings."""
     if embeddings is None or not original_sentences:
         return []
