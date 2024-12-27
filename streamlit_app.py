@@ -20,6 +20,7 @@ from torch.nn import TransformerEncoder, TransformerEncoderLayer
 import warnings
 
 warnings.filterwarnings('ignore')
+nltk.download('punkt')
 
 # Set random seed for reproducibility
 SEED_VALUE = 42
