@@ -172,7 +172,96 @@ def pad_embeddings(embeddings):
                 padding_tensor = torch.zeros(
                     (embedding.shape[0], max_length - embedding.shape[1], embedding.shape[2])
                 )
-                padded_embedding = torch.cat((embedding, padding_tensor), dim
+                padded_embedding = torch.cat((embedding, padding_tensor), dim=1)
+            else:
+                padded_embedding = embedding
+
+            padded_embeddings.append(padded_embedding)
+
+        return torch.stack(padded_embeddings)
+    except Exception as e:
+        st.error(f"Error during padding: {str(e)}")
+        return None
+
+def generate_summary_in_batches(model, input_embeddings, batch_size=1):
+    """Generate summaries in batches."""
+    if input_embeddings is None:
+        return None
+        
+    model.eval()
+    summaries = []
+    try:
+        with torch.no_grad():
+            for i in range(0, input_embeddings.size(0), batch_size):
+                batch_embeddings = input_embeddings[i:i + batch_size]
+                summary = model(batch_embeddings)
+                summaries.append(summary.cpu())
+        return torch.cat(summaries, dim=0)
+    except Exception as e:
+        st.error(f"Error generating summary: {str(e)}")
+        return None
+
+def extract_important_sentences(embeddings, original_sentences, top_k=3):
+    """Extract the most important sentences based on embeddings."""
+    if embeddings is None or not original_sentences:
+        return []
+        
+    try:
+        sentence_scores = []
+        for i in range(min(embeddings.shape[0], len(original_sentences))):
+            max_values = embeddings[i].max(dim=0).values
+            mean_value = torch.mean(max_values)
+            sentence_scores.append((mean_value, i))
+
+        sentence_scores.sort(reverse=True)
+        top_k = min(5, len(sentence_scores))
+        selected_indices = [idx for _, idx in sentence_scores[:top_k]]
+        return [original_sentences[idx] for idx in sorted(selected_indices)]
+    except Exception as e:
+        st.error(f"Error extracting sentences: {str(e)}")
+        return []
+
+def bart_summarize(text, tokenizer, model, max_length=50, min_length=10):
+    """Generate summary using BART."""
+    try:
+        inputs = tokenizer(text, max_length=1024, return_tensors="pt", truncation=True)
+        summary_ids = model.generate(
+            inputs["input_ids"],
+            max_length=max_length,
+            min_length=min_length,
+            length_penalty=2.0,
+            num_beams=4,
+            early_stopping=True
+        )
+        return tokenizer.decode(summary_ids[0], skip_special_tokens=True)
+    except Exception as e:
+        st.error(f"Error in BART summarization: {str(e)}")
+        return ""
+
+@st.cache_resource
+def load_models():
+    try:
+        # BERT
+        bert_tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+        bert_model = BertModel.from_pretrained('bert-base-uncased')
+        
+        # BART
+        bart_tokenizer = BartTokenizer.from_pretrained("facebook/bart-large-cnn")
+        bart_model = BartForConditionalGeneration.from_pretrained("facebook/bart-large-cnn")
+        
+        # Transformer
+        transformer_model = TransformerModel(
+            nhead=2,
+            num_encoder_layers=4,
+            d_model=768,
+            dim_feedforward=512,
+            dropout=0.1
+        )
+        
+        return (bert_tokenizer, bert_model, bart_tokenizer, bart_model, transformer_model)
+    except Exception as e:
+        st.error(f"Error loading models: {str(e)}")
+        return None
 
 def main():
     st.title("Enhanced Review Summarizer")
