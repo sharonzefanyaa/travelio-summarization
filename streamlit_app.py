@@ -199,7 +199,7 @@ def pad_embeddings(embeddings):
         
     try:
         max_length = max(embedding.shape[1] for embedding in embeddings)
-        max_batch_size = 1  # Simplified to handle one sentence at a time
+        max_batch_size = 2  # Simplified to handle one sentence at a time
 
         padded_embeddings = []
         for embedding in embeddings:
@@ -259,7 +259,7 @@ def extract_important_sentences(embeddings, original_sentences, top_k=3):
         st.error(f"Error extracting sentences: {str(e)}")
         return []
 
-def bart_summarize(text, tokenizer, model, max_length=50, min_length=10):
+def bart_summarize(text, tokenizer, model, max_length=max_length, min_length=min_length):
     """Generate summary using BART."""
     try:
         inputs = tokenizer(text, max_length=1024, return_tensors="pt", truncation=True)
@@ -268,7 +268,8 @@ def bart_summarize(text, tokenizer, model, max_length=50, min_length=10):
             max_length=max_length,
             min_length=min_length,
             length_penalty=2.0,
-            num_beams=4,
+            no_repeat_ngram_size=3,
+            num_beams=2,
             early_stopping=True
         )
         return tokenizer.decode(summary_ids[0], skip_special_tokens=True)
@@ -328,8 +329,8 @@ def process_all_reviews(temp_dataset, bert_tokenizer, bert_model, bart_tokenizer
                 " ".join(important_sentences),
                 bart_tokenizer,
                 bart_model,
-                max_length=30,  # Shorter summary
-                min_length=10
+                max_length=50,
+                min_length=20
             )
             return [{'text': combined_text, 'summary': final_summary}]
     
