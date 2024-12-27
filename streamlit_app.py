@@ -238,22 +238,22 @@ def generate_summary_in_batches(model, input_embeddings, batch_size=32):
         return None
 
 def extract_important_sentences(embeddings, original_sentences, top_k=5):
-    """Extract the most important sentences based on embeddings."""
     if embeddings is None or not original_sentences:
         return []
         
     try:
         sentence_scores = []
-        for i in range(embeddings.shape[0]):
-            max_values_per_sentence = embeddings[i].max(dim=0).values
-            mean_value_per_sentence = torch.mean(max_values_per_sentence)
-            sentence_scores.append((mean_value_per_sentence, i))
-        sentence_scores.sort(reverse=True, key=lambda x: x[0])
-        top_indices = [index for _, index in sentence_scores[:top_k]]
-        important_sentences = [original_sentences[index] for index in top_indices]
-        return important_sentences
+        for i in range(min(embeddings.shape[0], len(original_sentences))):
+            values = embeddings[i].max(dim=0).values
+            score = torch.mean(values)
+            sentence_scores.append((score.item(), i))
+
+        sentence_scores.sort(reverse=True)
+        actual_k = min(top_k, len(sentence_scores))
+        selected_indices = [idx for _, idx in sentence_scores[:actual_k]]
+        return [original_sentences[idx] for idx in sorted(selected_indices)]
     except Exception as e:
-        st.error(f"Error extracting sentences: {str(e)}")
+        st.error(f"Sentence extraction error: {str(e)}")
         return []
 
 def bart_summarize(text, tokenizer, model, max_length=50, min_length=20):
