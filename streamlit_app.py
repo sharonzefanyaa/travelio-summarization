@@ -350,9 +350,8 @@ def process_all_reviews(temp_dataset, bert_tokenizer, bert_model, bart_tokenizer
         return []
 
 def main():
-    st.title("Reviews Summarizer")
+    st.title("Travelio Reviews Summarizer")
     
-    # Initialize database and load models
     db = initialize_database()
     models = load_models()
     if models is None:
@@ -360,10 +359,6 @@ def main():
         return
         
     bert_tokenizer, bert_model, bart_tokenizer, bart_model, transformer_model = models
-    
-    # Display dataset statistics
-    current_data = db.get_all_reviews()
-    st.sidebar.write(f"Database size: {len(current_data)} reviews")
     
     # Input section
     review_type = st.sidebar.selectbox(
@@ -380,13 +375,11 @@ def main():
             
         with st.spinner("Processing..."):
             try:
-                # Preprocess new text
+                # Preprocess and create temp dataset
                 cleaned_text = clean_text(review_text)
-                
-                # Create temporary dataset with sentiment-specific data
                 temp_dataset = db.create_temp_dataset(review_text, review_type, cleaned_text)
                 
-                # Process all reviews in dataset
+                # Process and summarize
                 summaries = process_all_reviews(
                     temp_dataset,
                     bert_tokenizer, 
@@ -396,24 +389,13 @@ def main():
                     transformer_model
                 )
                 
-                # Display results
-                st.subheader("Results")
-                
-                # Display new review summary
-                st.write("### New Review")
-                st.write(f"Original: {review_text}")
-                st.write(f"Summary: {summaries[-1]['summary']}")
-                
-                # Display other summaries
-                st.write("### Other Reviews")
-                for i, summary in enumerate(summaries[:-1]):
-                    st.write(f"Review {i+1}:")
-                    st.write(f"Original: {summary['text']}")
-                    st.write(f"Summary: {summary['summary']}")
-                
-                # Add to database
-                db.add_review(review_text, review_type, cleaned_text)
-                st.success("Review processed and added to database")
+                if summaries:
+                    st.write("### Added Review:")
+                    st.write(review_text)
+                    st.write("\n### Summary Result:")
+                    st.write(summaries[0]['summary'])
+                else:
+                    st.error("Failed to generate summary")
                 
             except Exception as e:
                 st.error(f"Error: {str(e)}")
