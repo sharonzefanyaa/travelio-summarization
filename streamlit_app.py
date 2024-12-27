@@ -53,56 +53,35 @@ class DatabaseManager:
         
     def get_connection(self):
         return sqlite3.connect(self.db_path)
-        
-    def create_tables(self):
-        with self.get_connection() as conn:
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS reviews (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    text TEXT NOT NULL,
-                    sentiment TEXT NOT NULL,
-                    cleaned_text TEXT NOT NULL
-                )
-            ''')
-    
-    def load_initial_data(self):
-        self.create_tables()
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute('SELECT COUNT(*) FROM reviews')
-                count = cursor.fetchone()[0]
-                if count == 0:
-                    for sentiment, filename in TEXT_FILES.items():
-                        url = GITHUB_BASE_URL + filename
-                        response = requests.get(url)
-                        if response.status_code == 200:
-                            texts = response.text.strip().split('\n')
-                            for text in texts:
-                                cleaned = clean_text(text)
-                                self.add_review(text, sentiment, cleaned)
-        except Exception as e:
-            st.error(f"Error loading initial data: {str(e)}")
-    
-    def add_review(self, text, sentiment, cleaned_text):
-        with self.get_connection() as conn:
-            conn.execute(
-                'INSERT INTO reviews (text, sentiment, cleaned_text) VALUES (?, ?, ?)',
-                (text, sentiment, cleaned_text)
-            )
-    
-    def get_all_reviews(self):
-        with self.get_connection() as conn:
-            return pd.read_sql('SELECT * FROM reviews', conn)
+
+    def load_sentiment_data(self, sentiment):
+        url = GITHUB_BASE_URL + TEXT_FILES[sentiment]
+        response = requests.get(url)
+        if response.status_code == 200:
+            return [text.strip() for text in response.text.strip().split('\n')]
+        return []
 
     def create_temp_dataset(self, new_text, sentiment, cleaned_text):
-        all_reviews = self.get_all_reviews()
-        new_row = pd.DataFrame({
-            'text': [new_text],
-            'sentiment': [sentiment],
-            'cleaned_text': [cleaned_text]
+        # Load original sentiment data
+        original_texts = self.load_sentiment_data(sentiment)
+        
+        # Create DataFrame from original texts
+        temp_data = []
+        for text in original_texts:
+            temp_data.append({
+                'text': text,
+                'sentiment': sentiment,
+                'cleaned_text': clean_text(text)
+            })
+            
+        # Add new review
+        temp_data.append({
+            'text': new_text,
+            'sentiment': sentiment,
+            'cleaned_text': cleaned_text
         })
-        return pd.concat([all_reviews, new_row], ignore_index=True)
+        
+        return pd.DataFrame(temp_data)
 
 def initialize_database():
     try:
@@ -317,29 +296,42 @@ def load_models():
         st.error(f"Error loading models: {str(e)}")
         return None
 
-def main():
-    st.title("Enhanced Review Summarizer")
+def process_all_reviews(temp_dataset, bert_tokenizer, bert_model, bart_tokenizer, bart_model, transformer_model):
+    summaries = []
     
-    # Initialize database and load models
-    db = initialize_database()
-    models = load_models()
-    if models is None:
-        st.error("Failed to load models")
-        return
+    for _, row in temp_dataset.iterrows():
+        sentences = tokenize_sentences(row['cleaned_text'])
+        embeddings = get_embeddings(sentences, bert_tokenizer, bert_model)
+        padded_embeddings = pad_embeddings(embeddings)
         
-    bert_tokenizer, bert_model, bart_tokenizer, bart_model, transformer_model = models
+        if padded_embeddings is not None:
+            reshaped_embeddings = padded_embeddings.view(
+                -1, padded_embeddings.shape[2], padded_embeddings.shape[3]
+            )
+            
+            summary_embeddings = generate_summary_in_batches(
+                transformer_model, reshaped_embeddings
+            )
+            
+            important_sentences = extract_important_sentences(
+                summary_embeddings, sentences
+            )
+            
+            if important_sentences:
+                summary = bart_summarize(
+                    " ".join(important_sentences),
+                    bart_tokenizer,
+                    bart_model
+                )
+                summaries.append({
+                    'text': row['text'],
+                    'summary': summary
+                })
     
-    # Display dataset statistics
-    current_data = db.get_all_reviews()
-    st.sidebar.write(f"Database size: {len(current_data)} reviews")
-    
-    # Input section
-    review_type = st.sidebar.selectbox(
-        "Select Review Type",
-        ["Positive", "Neutral", "Negative"]
-    )
-    
-    review_text = st.text_area("Enter new review:", height=150)
+    return summaries
+
+def main():
+    [Previous initialization code remains unchanged]
     
     if st.button("Process & Summarize"):
         if not review_text:
@@ -351,49 +343,38 @@ def main():
                 # Preprocess new text
                 cleaned_text = clean_text(review_text)
                 
-                # Create temporary dataset
+                # Create temporary dataset with sentiment-specific data
                 temp_dataset = db.create_temp_dataset(review_text, review_type, cleaned_text)
                 
-                # Process for summarization
-                sentences = tokenize_sentences(cleaned_text)
-                embeddings = get_embeddings(sentences, bert_tokenizer, bert_model)
-                padded_embeddings = pad_embeddings(embeddings)
+                # Process all reviews in dataset
+                summaries = process_all_reviews(
+                    temp_dataset,
+                    bert_tokenizer, 
+                    bert_model,
+                    bart_tokenizer,
+                    bart_model,
+                    transformer_model
+                )
                 
-                if padded_embeddings is not None:
-                    reshaped_embeddings = padded_embeddings.view(
-                        -1, padded_embeddings.shape[2], padded_embeddings.shape[3]
-                    )
-                    
-                    summary_embeddings = generate_summary_in_batches(
-                        transformer_model, reshaped_embeddings
-                    )
-                    
-                    important_sentences = extract_important_sentences(
-                        summary_embeddings, sentences
-                    )
-                    
-                    if important_sentences:
-                        final_summary = bart_summarize(
-                            " ".join(important_sentences), 
-                            bart_tokenizer, 
-                            bart_model
-                        )
-                        
-                        # Add to database
-                        db.add_review(review_text, review_type, cleaned_text)
-                        
-                        # Display results
-                        st.subheader("Results")
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.write("Original Review:")
-                            st.write(review_text)
-                        with col2:
-                            st.write("Summary:")
-                            st.write(final_summary)
-                        
-                        st.success("Review processed and added to database")
-                        
+                # Display results
+                st.subheader("Results")
+                
+                # Display new review summary
+                st.write("### New Review")
+                st.write(f"Original: {review_text}")
+                st.write(f"Summary: {summaries[-1]['summary']}")
+                
+                # Display other summaries
+                st.write("### Other Reviews")
+                for i, summary in enumerate(summaries[:-1]):
+                    st.write(f"Review {i+1}:")
+                    st.write(f"Original: {summary['text']}")
+                    st.write(f"Summary: {summary['summary']}")
+                
+                # Add to database
+                db.add_review(review_text, review_type, cleaned_text)
+                st.success("Review processed and added to database")
+                
             except Exception as e:
                 st.error(f"Error: {str(e)}")
 
