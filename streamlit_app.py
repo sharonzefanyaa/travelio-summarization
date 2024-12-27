@@ -90,6 +90,28 @@ def initialize_database():
     db.load_initial_data()
     return db
 
+class TransformerModel(nn.Module):
+    def __init__(self, nhead, num_encoder_layers, d_model, dim_feedforward=2048, dropout=0.1):
+        super(TransformerModel, self).__init__()
+        
+        encoder_layers = TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout
+        )
+        
+        self.transformer_encoder = TransformerEncoder(
+            encoder_layers,
+            num_encoder_layers
+        )
+        
+        self.d_model = d_model
+        
+    def forward(self, src):
+        output = self.transformer_encoder(src)
+        return output
+
 def tokenize_sentences(text):
     """Simple regex-based sentence tokenizer"""
     # First, clean up any irregular spacing around punctuation
