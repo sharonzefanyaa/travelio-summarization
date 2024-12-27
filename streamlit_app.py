@@ -339,10 +339,10 @@ def process_all_reviews(temp_dataset, bert_tokenizer, bert_model, bart_tokenizer
                 " ".join(important_sentences),
                 bart_tokenizer,
                 bart_model,
-                max_length=30,
-                min_length=15
+                max_length=50,
+                min_length=20
             )
-            return [{'text': combined_text, 'summary': final_summary}]
+            return final_summary
         
         return []
     except Exception as e:
@@ -393,7 +393,7 @@ def main():
                     st.write("### Added Review:")
                     st.write(review_text)
                     st.write("\n### Summary Result:")
-                    st.write(summaries[0]['summary'])
+                    st.write(summaries)
                 else:
                     st.error("Failed to generate summary")
                 
