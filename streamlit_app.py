@@ -104,6 +104,15 @@ class DatabaseManager:
         })
         return pd.concat([all_reviews, new_row], ignore_index=True)
 
+def initialize_database():
+    try:
+        db = DatabaseManager()
+        db.load_initial_data()
+        return db
+    except Exception as e:
+        st.error(f"Database initialization error: {str(e)}")
+        return None
+
 def tokenize_sentences(text):
     """Simple regex-based sentence tokenizer"""
     # First, clean up any irregular spacing around punctuation
