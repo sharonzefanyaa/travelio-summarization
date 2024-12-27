@@ -331,7 +331,28 @@ def process_all_reviews(temp_dataset, bert_tokenizer, bert_model, bart_tokenizer
     return summaries
 
 def main():
-    [Previous initialization code remains unchanged]
+    st.title("Reviews Summarizer")
+    
+    # Initialize database and load models
+    db = initialize_database()
+    models = load_models()
+    if models is None:
+        st.error("Failed to load models")
+        return
+        
+    bert_tokenizer, bert_model, bart_tokenizer, bart_model, transformer_model = models
+    
+    # Display dataset statistics
+    current_data = db.get_all_reviews()
+    st.sidebar.write(f"Database size: {len(current_data)} reviews")
+    
+    # Input section
+    review_type = st.sidebar.selectbox(
+        "Select Review Type",
+        ["Positive", "Neutral", "Negative"]
+    )
+    
+    review_text = st.text_area("Enter new review:", height=150)
     
     if st.button("Process & Summarize"):
         if not review_text:
