@@ -1,36 +1,72 @@
-# streamlit_app.py
 import streamlit as st
 import torch
 import re
-from transformers import (
-    BertTokenizer, 
-    BertModel,
-    BartTokenizer, 
-    BartForConditionalGeneration
-)
-import torch.nn as nn
-from torch.nn import TransformerEncoder, TransformerEncoderLayer
-import warnings
+import pandas as pd
+import sqlite3
+import requests
+from io import StringIO
 
-warnings.filterwarnings('ignore')
+# Constants
+GITHUB_BASE_URL = "https://raw.githubusercontent.com/sharonzefanyaa/travelio-summarization/d8459d9276f0410a4d549a19381dc8e93544195b/"
+TEXT_FILES = {
+    "Negative": "negative_text.txt",
+    "Neutral": "neutral_text.txt",
+    "Positive": "positive_text.txt"
+}
 
-# Set random seed for reproducibility
-SEED_VALUE = 42
-torch.manual_seed(SEED_VALUE)
-if torch.cuda.is_available():
-    torch.cuda.manual_seed_all(SEED_VALUE)
+class DatabaseManager:
+    def __init__(self):
+        self.conn = sqlite3.connect('reviews.db')
+        self.create_tables()
+        
+    def create_tables(self):
+        with self.conn:
+            self.conn.execute('''
+                CREATE TABLE IF NOT EXISTS reviews (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    text TEXT NOT NULL,
+                    sentiment TEXT NOT NULL,
+                    cleaned_text TEXT NOT NULL
+                )
+            ''')
+    
+    def load_initial_data(self):
+        try:
+            for sentiment, filename in TEXT_FILES.items():
+                url = GITHUB_BASE_URL + filename
+                response = requests.get(url)
+                if response.status_code == 200:
+                    texts = response.text.strip().split('\n')
+                    for text in texts:
+                        cleaned = clean_text(text)
+                        self.add_review(text, sentiment, cleaned)
+        except Exception as e:
+            st.error(f"Error loading initial data: {str(e)}")
+    
+    def add_review(self, text, sentiment, cleaned_text):
+        with self.conn:
+            self.conn.execute(
+                'INSERT INTO reviews (text, sentiment, cleaned_text) VALUES (?, ?, ?)',
+                (text, sentiment, cleaned_text)
+            )
+    
+    def get_all_reviews(self):
+        return pd.read_sql('SELECT * FROM reviews', self.conn)
 
-# Check CUDA availability
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    def create_temp_dataset(self, new_text, sentiment, cleaned_text):
+        all_reviews = self.get_all_reviews()
+        new_row = pd.DataFrame({
+            'text': [new_text],
+            'sentiment': [sentiment],
+            'cleaned_text': [cleaned_text]
+        })
+        return pd.concat([all_reviews, new_row], ignore_index=True)
 
-def tokenize_sentences(text):
-    """Simple regex-based sentence tokenizer"""
-    # First, clean up any irregular spacing around punctuation
-    text = re.sub(r'\s*([.!?])\s*', r'\1 ', text)
-    # Split on period, exclamation mark, or question mark
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    # Clean up and return non-empty sentences
-    return [s.strip() for s in sentences if s.strip()]
+@st.cache_resource
+def initialize_database():
+    db = DatabaseManager()
+    db.load_initial_data()
+    return db
 
 def clean_text(text):
     """Clean and preprocess the input text."""
@@ -136,190 +172,87 @@ def pad_embeddings(embeddings):
                 padding_tensor = torch.zeros(
                     (embedding.shape[0], max_length - embedding.shape[1], embedding.shape[2])
                 )
-                padded_embedding = torch.cat((embedding, padding_tensor), dim=1)
-            else:
-                padded_embedding = embedding
-
-            padded_embeddings.append(padded_embedding)
-
-        return torch.stack(padded_embeddings)
-    except Exception as e:
-        st.error(f"Error during padding: {str(e)}")
-        return None
-
-def generate_summary_in_batches(model, input_embeddings, batch_size=1):
-    """Generate summaries in batches."""
-    if input_embeddings is None:
-        return None
-        
-    model.eval()
-    summaries = []
-    try:
-        with torch.no_grad():
-            for i in range(0, input_embeddings.size(0), batch_size):
-                batch_embeddings = input_embeddings[i:i + batch_size]
-                summary = model(batch_embeddings)
-                summaries.append(summary.cpu())
-        return torch.cat(summaries, dim=0)
-    except Exception as e:
-        st.error(f"Error generating summary: {str(e)}")
-        return None
-
-def extract_important_sentences(embeddings, original_sentences, top_k=3):
-    """Extract the most important sentences based on embeddings."""
-    if embeddings is None or not original_sentences:
-        return []
-        
-    try:
-        sentence_scores = []
-        for i in range(min(embeddings.shape[0], len(original_sentences))):
-            max_values = embeddings[i].max(dim=0).values
-            mean_value = torch.mean(max_values)
-            sentence_scores.append((mean_value, i))
-
-        sentence_scores.sort(reverse=True)
-        top_k = min(5, len(sentence_scores))
-        selected_indices = [idx for _, idx in sentence_scores[:top_k]]
-        return [original_sentences[idx] for idx in sorted(selected_indices)]
-    except Exception as e:
-        st.error(f"Error extracting sentences: {str(e)}")
-        return []
-
-def bart_summarize(text, tokenizer, model, max_length=50, min_length=10):
-    """Generate summary using BART."""
-    try:
-        inputs = tokenizer(text, max_length=1024, return_tensors="pt", truncation=True)
-        summary_ids = model.generate(
-            inputs["input_ids"],
-            max_length=max_length,
-            min_length=min_length,
-            length_penalty=2.0,
-            num_beams=4,
-            early_stopping=True
-        )
-        return tokenizer.decode(summary_ids[0], skip_special_tokens=True)
-    except Exception as e:
-        st.error(f"Error in BART summarization: {str(e)}")
-        return ""
-
-@st.cache_resource
-def load_models():
-    try:
-        # BERT
-        bert_tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-        bert_model = BertModel.from_pretrained('bert-base-uncased')
-        
-        # BART
-        bart_tokenizer = BartTokenizer.from_pretrained("facebook/bart-large-cnn")
-        bart_model = BartForConditionalGeneration.from_pretrained("facebook/bart-large-cnn")
-        
-        # Transformer
-        transformer_model = TransformerModel(
-            nhead=2,
-            num_encoder_layers=4,
-            d_model=768,
-            dim_feedforward=512,
-            dropout=0.1
-        )
-        
-        return (bert_tokenizer, bert_model, bart_tokenizer, bart_model, transformer_model)
-    except Exception as e:
-        st.error(f"Error loading models: {str(e)}")
-        return None
+                padded_embedding = torch.cat((embedding, padding_tensor), dim
 
 def main():
-    st.title("Review Summarizer")
+    st.title("Enhanced Review Summarizer")
     
-    # Load models
+    # Initialize database and load models
+    db = initialize_database()
     models = load_models()
     if models is None:
-        st.error("Failed to load required models. Please try again later.")
+        st.error("Failed to load models")
         return
         
     bert_tokenizer, bert_model, bart_tokenizer, bart_model, transformer_model = models
     
-    # Sidebar
-    st.sidebar.header("Settings")
+    # Display dataset statistics
+    current_data = db.get_all_reviews()
+    st.sidebar.write(f"Database size: {len(current_data)} reviews")
+    
+    # Input section
     review_type = st.sidebar.selectbox(
         "Select Review Type",
         ["Positive", "Neutral", "Negative"]
     )
     
-    # Main content
-    st.write(f"Selected Review Type: **{review_type}**")
+    review_text = st.text_area("Enter new review:", height=150)
     
-    # Text input
-    review_text = st.text_area("Enter your review:", height=150)
-    
-    if st.button("Generate Summary"):
+    if st.button("Process & Summarize"):
         if not review_text:
-            st.warning("Please enter a review to generate a summary.")
+            st.warning("Please enter a review.")
             return
             
-        with st.spinner("Generating summary..."):
+        with st.spinner("Processing..."):
             try:
-                # Clean and prepare text
+                # Preprocess new text
                 cleaned_text = clean_text(review_text)
+                
+                # Create temporary dataset
+                temp_dataset = db.create_temp_dataset(review_text, review_type, cleaned_text)
+                
+                # Process for summarization
                 sentences = tokenize_sentences(cleaned_text)
-                
-                if not sentences:
-                    st.warning("No valid sentences found in the input text. Please check your review.")
-                    return
-                
-                # Process text through the pipeline
                 embeddings = get_embeddings(sentences, bert_tokenizer, bert_model)
-                
-                if not embeddings:
-                    st.error("Could not generate embeddings from the text. Please try a different review.")
-                    return
-                    
                 padded_embeddings = pad_embeddings(embeddings)
                 
-                if padded_embeddings is None:
-                    st.error("Error during embedding processing. Please try a different review.")
-                    return
-                
-                # Reshape embeddings
-                reshaped_embeddings = padded_embeddings.view(
-                    -1, 
-                    padded_embeddings.shape[2], 
-                    padded_embeddings.shape[3]
-                )
-                
-                # Generate summary
-                summary_embeddings = generate_summary_in_batches(
-                    transformer_model, 
-                    reshaped_embeddings
-                )
-                
-                if summary_embeddings is None:
-                    st.error("Error generating summary embeddings. Please try again.")
-                    return
-                
-                important_sentences = extract_important_sentences(
-                    summary_embeddings, 
-                    sentences
-                )
-                
-                if not important_sentences:
-                    st.error("Could not extract key sentences. Please try a different review.")
-                    return
-                
-                # Generate final summary
-                combined_sentences = " ".join(important_sentences)
-                final_summary = bart_summarize(combined_sentences, bart_tokenizer, bart_model)
-                
-                if not final_summary:
-                    st.error("Could not generate final summary. Please try again.")
-                    return
-                
-                # Display the final summary
-                st.subheader("Summary")
-                st.write(final_summary)
-                
+                if padded_embeddings is not None:
+                    reshaped_embeddings = padded_embeddings.view(
+                        -1, padded_embeddings.shape[2], padded_embeddings.shape[3]
+                    )
+                    
+                    summary_embeddings = generate_summary_in_batches(
+                        transformer_model, reshaped_embeddings
+                    )
+                    
+                    important_sentences = extract_important_sentences(
+                        summary_embeddings, sentences
+                    )
+                    
+                    if important_sentences:
+                        final_summary = bart_summarize(
+                            " ".join(important_sentences), 
+                            bart_tokenizer, 
+                            bart_model
+                        )
+                        
+                        # Add to database
+                        db.add_review(review_text, review_type, cleaned_text)
+                        
+                        # Display results
+                        st.subheader("Results")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.write("Original Review:")
+                            st.write(review_text)
+                        with col2:
+                            st.write("Summary:")
+                            st.write(final_summary)
+                        
+                        st.success("Review processed and added to database")
+                        
             except Exception as e:
-                st.error("An unexpected error occurred. Please try again with a different review.")
-                st.error(f"Error details: {str(e)}")
+                st.error(f"Error: {str(e)}")
 
 if __name__ == "__main__":
     main()
