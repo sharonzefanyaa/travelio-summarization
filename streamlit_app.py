@@ -199,29 +199,27 @@ def pad_embeddings(embeddings):
         
     try:
         max_length = max(embedding.shape[1] for embedding in embeddings)
-        max_batch_size = 2  # Simplified to handle one sentence at a time
-
+        max_batch_size = 2  # Change this based on your requirements
         padded_embeddings = []
+
         for embedding in embeddings:
-            if embedding.shape[0] < max_batch_size:
-                embedding = embedding.repeat(max_batch_size, 1, 1)
-            
-            if embedding.shape[1] < max_length:
-                padding_tensor = torch.zeros(
-                    (embedding.shape[0], max_length - embedding.shape[1], embedding.shape[2])
-                )
+            current_batch_size = embedding.shape[0]
+            current_length = embedding.shape[1]
+            if current_batch_size < max_batch_size:
+                embedding = embedding.repeat(max_batch_size // current_batch_size, 1, 1)
+            if current_length < max_length:
+                padding_tensor = torch.zeros((embedding.shape[0], max_length - current_length, embedding.shape[2]))
                 padded_embedding = torch.cat((embedding, padding_tensor), dim=1)
             else:
-                padded_embedding = embedding
-
+                padded_embedding = embedding  # No padding needed if lengths are the same
             padded_embeddings.append(padded_embedding)
-
         return torch.stack(padded_embeddings)
+        
     except Exception as e:
         st.error(f"Error during padding: {str(e)}")
         return None
 
-def generate_summary_in_batches(model, input_embeddings, batch_size=1):
+def generate_summary_in_batches(model, input_embeddings, batch_size=32):
     """Generate summaries in batches."""
     if input_embeddings is None:
         return None
@@ -246,15 +244,14 @@ def extract_important_sentences(embeddings, original_sentences, top_k=5):
         
     try:
         sentence_scores = []
-        for i in range(min(embeddings.shape[0], len(original_sentences))):
-            max_values = embeddings[i].max(dim=0).values
-            mean_value = torch.mean(max_values)
-            sentence_scores.append((mean_value, i))
-
-        sentence_scores.sort(reverse=True)
-        top_k = min(5, len(sentence_scores))
-        selected_indices = [idx for _, idx in sentence_scores[:top_k]]
-        return [original_sentences[idx] for idx in sorted(selected_indices)]
+        for i in range(embeddings.shape[0]):
+            max_values_per_sentence = embeddings[i].max(dim=0).values
+            mean_value_per_sentence = torch.mean(max_values_per_sentence)
+            sentence_scores.append((mean_value_per_sentence, i))
+        sentence_scores.sort(reverse=True, key=lambda x: x[0])
+        top_indices = [index for _, index in sentence_scores[:top_k]]
+        important_sentences = [original_sentences[index] for index in top_indices]
+        return important_sentences
     except Exception as e:
         st.error(f"Error extracting sentences: {str(e)}")
         return []
