@@ -302,38 +302,38 @@ def load_models():
         return None
 
 def process_all_reviews(temp_dataset, bert_tokenizer, bert_model, bart_tokenizer, bart_model, transformer_model):
-    summaries = []
+    # Combine all texts for unified summarization
+    combined_text = " ".join(temp_dataset['cleaned_text'].tolist())
     
-    for _, row in temp_dataset.iterrows():
-        sentences = sent_tokenize(row['cleaned_text'])
-        embeddings = get_embeddings(sentences, bert_tokenizer, bert_model)
-        padded_embeddings = pad_embeddings(embeddings)
+    # Process combined text
+    sentences = sent_tokenize(combined_text)
+    embeddings = get_embeddings(sentences, bert_tokenizer, bert_model)
+    padded_embeddings = pad_embeddings(embeddings)
+    
+    if padded_embeddings is not None:
+        reshaped_embeddings = padded_embeddings.view(
+            -1, padded_embeddings.shape[2], padded_embeddings.shape[3]
+        )
         
-        if padded_embeddings is not None:
-            reshaped_embeddings = padded_embeddings.view(
-                -1, padded_embeddings.shape[2], padded_embeddings.shape[3]
+        summary_embeddings = generate_summary_in_batches(
+            transformer_model, reshaped_embeddings
+        )
+        
+        important_sentences = extract_important_sentences(
+            summary_embeddings, sentences
+        )
+        
+        if important_sentences:
+            final_summary = bart_summarize(
+                " ".join(important_sentences),
+                bart_tokenizer,
+                bart_model,
+                max_length=30,  # Shorter summary
+                min_length=10
             )
-            
-            summary_embeddings = generate_summary_in_batches(
-                transformer_model, reshaped_embeddings
-            )
-            
-            important_sentences = extract_important_sentences(
-                summary_embeddings, sentences
-            )
-            
-            if important_sentences:
-                summary = bart_summarize(
-                    " ".join(important_sentences),
-                    bart_tokenizer,
-                    bart_model
-                )
-                summaries.append({
-                    'text': row['text'],
-                    'summary': summary
-                })
+            return [{'text': combined_text, 'summary': final_summary}]
     
-    return summaries
+    return []
 
 def main():
     st.title("Reviews Summarizer")
