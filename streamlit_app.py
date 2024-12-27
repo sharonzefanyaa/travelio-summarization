@@ -36,14 +36,27 @@ TEXT_FILES = {
     "Positive": "positive_text.txt"
 }
 
+class TransformerModel(nn.Module):
+    def __init__(self, nhead, num_encoder_layers, d_model, dim_feedforward=2048, dropout=0.1):
+        super(TransformerModel, self).__init__()
+        encoder_layers = TransformerEncoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=dim_feedforward, dropout=dropout)
+        self.transformer_encoder = TransformerEncoder(encoder_layers, num_encoder_layers)
+        self.d_model = d_model
+        
+    def forward(self, src):
+        output = self.transformer_encoder(src)
+        return output
+
 class DatabaseManager:
     def __init__(self):
-        self.conn = sqlite3.connect('reviews.db')
-        self.create_tables()
+        self.db_path = 'reviews.db'
+        
+    def get_connection(self):
+        return sqlite3.connect(self.db_path)
         
     def create_tables(self):
-        with self.conn:
-            self.conn.execute('''
+        with self.get_connection() as conn:
+            conn.execute('''
                 CREATE TABLE IF NOT EXISTS reviews (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     text TEXT NOT NULL,
@@ -53,27 +66,34 @@ class DatabaseManager:
             ''')
     
     def load_initial_data(self):
+        self.create_tables()
         try:
-            for sentiment, filename in TEXT_FILES.items():
-                url = GITHUB_BASE_URL + filename
-                response = requests.get(url)
-                if response.status_code == 200:
-                    texts = response.text.strip().split('\n')
-                    for text in texts:
-                        cleaned = clean_text(text)
-                        self.add_review(text, sentiment, cleaned)
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT COUNT(*) FROM reviews')
+                count = cursor.fetchone()[0]
+                if count == 0:
+                    for sentiment, filename in TEXT_FILES.items():
+                        url = GITHUB_BASE_URL + filename
+                        response = requests.get(url)
+                        if response.status_code == 200:
+                            texts = response.text.strip().split('\n')
+                            for text in texts:
+                                cleaned = clean_text(text)
+                                self.add_review(text, sentiment, cleaned)
         except Exception as e:
             st.error(f"Error loading initial data: {str(e)}")
     
     def add_review(self, text, sentiment, cleaned_text):
-        with self.conn:
-            self.conn.execute(
+        with self.get_connection() as conn:
+            conn.execute(
                 'INSERT INTO reviews (text, sentiment, cleaned_text) VALUES (?, ?, ?)',
                 (text, sentiment, cleaned_text)
             )
     
     def get_all_reviews(self):
-        return pd.read_sql('SELECT * FROM reviews', self.conn)
+        with self.get_connection() as conn:
+            return pd.read_sql('SELECT * FROM reviews', conn)
 
     def create_temp_dataset(self, new_text, sentiment, cleaned_text):
         all_reviews = self.get_all_reviews()
@@ -83,34 +103,6 @@ class DatabaseManager:
             'cleaned_text': [cleaned_text]
         })
         return pd.concat([all_reviews, new_row], ignore_index=True)
-
-@st.cache_resource
-def initialize_database():
-    db = DatabaseManager()
-    db.load_initial_data()
-    return db
-
-class TransformerModel(nn.Module):
-    def __init__(self, nhead, num_encoder_layers, d_model, dim_feedforward=2048, dropout=0.1):
-        super(TransformerModel, self).__init__()
-        
-        encoder_layers = TransformerEncoderLayer(
-            d_model=d_model,
-            nhead=nhead,
-            dim_feedforward=dim_feedforward,
-            dropout=dropout
-        )
-        
-        self.transformer_encoder = TransformerEncoder(
-            encoder_layers,
-            num_encoder_layers
-        )
-        
-        self.d_model = d_model
-        
-    def forward(self, src):
-        output = self.transformer_encoder(src)
-        return output
 
 def tokenize_sentences(text):
     """Simple regex-based sentence tokenizer"""
